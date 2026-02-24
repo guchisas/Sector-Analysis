@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 Gemini AI 深層分析モジュール
-- gemini-2.0-flash によるセクターローテーション分析
+- gemini-1.5-pro/flash によるセクターローテーション分析
 - APIキー未設定・エラー時のフォールバック（定量サマリー）
 """
 import os
 import pandas as pd
 from dotenv import load_dotenv
+
 load_dotenv()
+
 def _get_api_key() -> str | None:
     """Gemini APIキーを取得する（環境変数 or Streamlit Secrets）"""
     # 環境変数から取得
@@ -22,9 +24,13 @@ def _get_api_key() -> str | None:
     except Exception:
         pass
     return None
+
 def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                   volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
     """AI分析用のプロンプトを構築する"""
+    
+    # --- ここは元のロジック通り、手動でテキストを組み立てます ---
+    
     # セクター騰落率テキスト
     sector_text = "【全33業種のセクター別データ】\n"
     if not sector_summary.empty:
@@ -38,6 +44,7 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
             )
     else:
         sector_text += "データなし\n"
+
     # 売られすぎ銘柄テキスト
     oversold_text = "\n【RSI 30以下の売られすぎ銘柄】\n"
     if not oversold_stocks.empty:
@@ -45,6 +52,7 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
             oversold_text += f"- {row['ticker']} ({row.get('name', '')}): RSI={row.get('rsi', 'N/A'):.1f}, セクター={row.get('sector', '')}\n"
     else:
         oversold_text += "該当なし\n"
+
     # 出来高急増テキスト
     volume_text = "\n【出来高急増銘柄（2倍以上）】\n"
     if not volume_surge_stocks.empty:
@@ -52,21 +60,48 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
             volume_text += f"- {row['ticker']} ({row.get('name', '')}): 出来高倍率={row.get('volume_ratio', 'N/A'):.2f}x, セクター={row.get('sector', '')}\n"
     else:
         volume_text += "該当なし\n"
-    prompt = f"""あなたはプロのトレーダー兼マーケットアナリストです。
-以下のデータを俯瞰的に分析し、資金循環（セクターローテーション）の観点から、
-次に注目すべきトレンドとスイングトレード（数日〜1週間）のチャンスを日本語で予測してください。
-分析は以下の構成で行ってください：
-1. **📊 マーケット概況**: 現在の市場全体のムード（データから読み取れる傾向）
-2. **🔄 資金流入セクター**: 出来高やRSIから「資金が流入している」と判断されるセクター
-3. **📉 推奨ローテーション先**: 次に資金が流入する可能性が高いセクターの予測と根拠
-4. **⚡ 注目銘柄TOP5**: スイングトレードの具体的な候補（ティッカー・理由付き）
-5. **⚠️ リスク要因**: 注意すべきリスクやネガティブシグナル
+
+    # --- ▼ ここだけ最新の「辛口ストラテジスト」指示に変更しました ▼ ---
+    prompt = f"""
+あなたは、ウォール街と兜町で20年以上の経験を持つ「辛口かつ論理的な株式ストラテジスト」です。
+提供された「定量データ（株価）」と「最新ニュース」を深く統合し、市場の背後にあるストーリー（ナラティブ）を解き明かしてください。
+
+【タスクの最優先事項】
+単なる「値動きの実況（〜が上がりました）」は不要です。「なぜ動いたのか？」という**背景要因（ニュース、決算、要人発言、地政学リスク）**を特定し、論理的に説明してください。
+
+【入力データ】
+1. セクター分析データ（定量）:
 {sector_text}
+
+2. 注目銘柄データ（売られすぎ/出来高急増）:
 {oversold_text}
 {volume_text}
+
+3. 最新の市況ニュース・ヘッドライン（情報源）:
 {news_text}
-データに基づいた具体的かつ実用的な分析をお願いします。"""
+
+【出力フォーマットと指示】
+以下の構成で、HTML形式（Markdown）で出力してください。です・ます調ですが、プロらしく断定的なトーンで書いてください。
+
+## 1. 📰 マーケット・ナラティブ（深層分析）
+* **市場のテーマ:** 現在、市場を支配しているメインテーマは何か？（例：「AIバブルの警戒感」「日銀の利上げ観測」など、ニュースから具体的な**固有名詞**を出して断定せよ）
+* **センチメント:** 投資家心理は「楽観」か「恐怖」か？それはどのニュース（例：アンソロピックの報道、米雇用統計など）に起因するか？
+* **ニュースとの結合:** 上記の定量データで特異な動きをしているセクターについて、ニュース記事内の出来事と因果関係を紐づけて解説せよ。
+
+## 2. 🔄 セクターローテーションの現状
+* **資金の流れ:** どのセクターからどのセクターへ資金が移動しているか？（例：ハイテクからバリューへの逃避、など）
+* **主役セクターの背景:** 最も強いセクターはなぜ買われているのか？（「原油高の恩恵」「半導体規制の影響」など具体的に）
+
+## 3. 📉 逆張り・リバウンド狙いの戦略
+* **売られすぎの正体:** リストアップされた「売られすぎ銘柄」は、単なる調整か？それとも悪材料が出た「落ちるナイフ」か？ニュースと照らし合わせて判断せよ。
+* **注目銘柄:** 特にリバウンドが期待できそうな銘柄を1つ挙げ、その定量的・定性的な根拠を述べよ。
+
+【制約事項】
+* 「変動しました」という曖昧な表現は禁止。「暴落」「急騰」「底堅い」など強い言葉を使うこと。
+* ニュースがない場合は「特段の材料は見当たらないが、需給要因と思われる」と正直に書くこと。
+"""
     return prompt
+
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                         volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
     """
@@ -76,29 +111,31 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
     api_key = _get_api_key()
     if not api_key:
         return _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
+
     try:
         import google.generativeai as genai
+        # v1を指定して安定化（推奨）
         genai.configure(api_key=api_key)
+
         # 利用可能なモデルでコンテンツ生成をサポートしているものを取得
         available_models = [
             m.name for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
         ]
         
-        # 優先順位（無料枠で安定稼働しやすいモデル）
+        # --- ▼ 優先順位リストを最新化（1.5 Pro / Flash を最優先に） ▼ ---
         preferred_models = [
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-flash-8b",
-            "models/gemini-1.5-flash-001",
-            "models/gemini-1.5-flash-002",
-            "models/gemini-1.5-pro",
-            "models/gemini-1.5-pro-001",
-            "models/gemini-1.5-pro-002",
-            "models/gemini-1.0-pro",
+            "models/gemini-1.5-pro",          # 最も賢いモデル（推奨）
+            "models/gemini-1.5-pro-latest",
+            "models/gemini-1.5-flash",        # 高速版
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-1.5-flash-8b",     # 軽量版
+            "models/gemini-2.0-flash",        # 実験版（エラーが出やすいので優先度下げ）
             "models/gemini-pro"
         ]
         
         selected_model = None
+        # 優先リストの上から順に、使えるものがあるかチェック
         for p in preferred_models:
             if p in available_models:
                 selected_model = p
@@ -111,16 +148,26 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         if not selected_model:
             raise Exception("コンテキスト生成をサポートするGeminiモデルが利用できません。")
             
-        # パスプレフィックス "models/" を除去してモデル名を取得
+        # パスプレフィックス "models/" を除去してモデル名を取得（念のため）
         model_name = selected_model.replace("models/", "")
-        model = genai.GenerativeModel(model_name)
+        
+        # モデル初期化（修正：再度 models/ をつけて指定するほうが安定する場合があるため調整）
+        try:
+            model = genai.GenerativeModel(selected_model) # 正式名称でトライ
+        except:
+            model = genai.GenerativeModel(model_name) # ダメなら短い名前でトライ
+
         prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text)
+        
+        # 生成実行
         response = model.generate_content(prompt)
         return response.text
+
     except Exception as e:
         error_msg = f"⚠️ Gemini API エラー: {str(e)}\n\n"
         error_msg += _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
         return error_msg
+
 def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                                 volume_surge_stocks: pd.DataFrame) -> str:
     """
@@ -128,6 +175,7 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
     """
     lines = ["## 📊 定量分析サマリー（AIなし）\n"]
     lines.append("*Gemini APIが利用できないため、定量データのみに基づく分析です。*\n")
+
     # 出来高急増セクター
     if not sector_summary.empty:
         lines.append("### 🔥 出来高が活発なセクター（上位5）")
@@ -138,6 +186,7 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
                 f"平均RSI {row.get('avg_rsi', 0):.1f}"
             )
         lines.append("")
+
     # RSI低セクター（逆張り候補）
     if not sector_summary.empty:
         lines.append("### 📉 RSIが低いセクター（逆張り候補、上位5）")
@@ -148,6 +197,7 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
                 f"平均出来高倍率 {row.get('avg_volume_ratio', 0):.2f}x"
             )
         lines.append("")
+
     # 売られすぎ銘柄
     if not oversold_stocks.empty:
         lines.append("### ⚡ 売られすぎ銘柄（RSI ≤ 30）")
@@ -157,6 +207,7 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
                 f"RSI={row.get('rsi', 0):.1f}, セクター={row.get('sector', '')}"
             )
         lines.append("")
+
     # 出来高急増銘柄
     if not volume_surge_stocks.empty:
         lines.append("### 📈 出来高急増銘柄（上位10）")
@@ -166,10 +217,8 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
                 f"出来高倍率={row.get('volume_ratio', 0):.2f}x, セクター={row.get('sector', '')}"
             )
         lines.append("")
+
     if len(lines) <= 2:
         lines.append("データが不足しているため、分析を実行できません。\n「データを最新化」ボタンを押してデータを取得してください。")
+        
     return "\n".join(lines)
-
-
-
-
