@@ -103,7 +103,7 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         genai.configure(api_key=api_key)
         
         # 2.0は無料枠制限に引っかかりやすいため、より安定している 1.5-flash に意図的にダウングレードします
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
 
         prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text)
 
@@ -170,3 +170,4 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
         lines.append("データが不足しているため、分析を実行できません。\n「データを最新化」ボタンを押してデータを取得してください。")
 
     return "\n".join(lines)
+
