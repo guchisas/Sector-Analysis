@@ -14,6 +14,11 @@ def get_custom_css() -> str:
         max-width: 100%;
     }
 
+    /* ===== Streamlitデフォルトナビゲーションを非表示 ===== */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+
     /* ===== メトリクスカード ===== */
     .metric-card {
         background: linear-gradient(135deg, #1A1F2E 0%, #252B3B 100%);
@@ -225,7 +230,7 @@ def metric_card(label: str, value: str, icon: str = "📊", delta: str = "", del
 
 
 def stock_card(ticker: str, name: str, sector: str, close: float, volume: int,
-               rsi: float = None, volume_ratio: float = None) -> str:
+               rsi: float | None = None, volume_ratio: float | None = None) -> str:
     """銘柄情報カードHTMLを生成する（スマホフレンドリー）"""
     stats = [f'<span class="stock-stat">セクター: <strong>{sector}</strong></span>']
     stats.append(f'<span class="stock-stat">終値: <strong>¥{close:,.0f}</strong></span>')

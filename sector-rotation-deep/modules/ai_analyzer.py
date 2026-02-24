@@ -101,7 +101,9 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         import google.generativeai as genai
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        
+        # 2.0は無料枠制限に引っかかりやすいため、より安定している 1.5-flash に意図的にダウングレードします
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
         prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text)
 
