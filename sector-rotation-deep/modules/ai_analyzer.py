@@ -130,7 +130,6 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
             "models/gemini-1.5-flash",        # 高速版
             "models/gemini-1.5-flash-latest",
             "models/gemini-1.5-flash-8b",     # 軽量版
-            "models/gemini-2.0-flash",        # 実験版（エラーが出やすいので優先度下げ）
             "models/gemini-pro"
         ]
         
@@ -222,3 +221,4 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
         lines.append("データが不足しているため、分析を実行できません。\n「データを最新化」ボタンを押してデータを取得してください。")
         
     return "\n".join(lines)
+
