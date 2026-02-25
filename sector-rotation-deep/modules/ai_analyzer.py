@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 Gemini AI 深層分析モジュール
-- gemini-1.5-pro/flash によるセクターローテーション分析
+- gemini-2.0-flash によるセクターローテーション分析
 - APIキー未設定・エラー時のフォールバック（定量サマリー）
 """
+
 import os
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 def _get_api_key() -> str | None:
     """Gemini APIキーを取得する（環境変数 or Streamlit Secrets）"""
@@ -16,6 +18,7 @@ def _get_api_key() -> str | None:
     key = os.getenv("GEMINI_API_KEY")
     if key and key != "your_gemini_api_key_here":
         return key
+
     # Streamlit Secrets から取得（クラウドデプロイ時）
     try:
         import streamlit as st
@@ -23,14 +26,14 @@ def _get_api_key() -> str | None:
             return st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
+
     return None
+
 
 def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                   volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
     """AI分析用のプロンプトを構築する"""
-    
-    # --- ここは元のロジック通り、手動でテキストを組み立てます ---
-    
+
     # セクター騰落率テキスト
     sector_text = "【全33業種のセクター別データ】\n"
     if not sector_summary.empty:
@@ -61,7 +64,7 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
     else:
         volume_text += "該当なし\n"
 
-    # --- ▼ ここだけ最新の「辛口ストラテジスト」指示に変更しました ▼ ---
+    # --- ▼ 最新の「辛口ストラテジスト」指示 ▼ ---
     prompt = f"""
 あなたは、ウォール街と兜町で20年以上の経験を持つ「辛口かつ論理的な株式ストラテジスト」です。
 提供された「定量データ（株価）」と「最新ニュース」を深く統合し、市場の背後にあるストーリー（ナラティブ）を解き明かしてください。
@@ -100,37 +103,40 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 * 「変動しました」という曖昧な表現は禁止。「暴落」「急騰」「底堅い」など強い言葉を使うこと。
 * ニュースがない場合は「特段の材料は見当たらないが、需給要因と思われる」と正直に書くこと。
 """
+
     return prompt
+
 
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                         volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
     """
     Gemini APIを使用してセクターローテーション分析を実行する
+
     APIキー未設定やエラー時はフォールバックサマリーを返す
     """
     api_key = _get_api_key()
+
     if not api_key:
         return _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
 
     try:
         import google.generativeai as genai
-        # v1を指定して安定化（推奨）
-        genai.configure(api_key=api_key)
 
-        # 利用可能なモデルでコンテンツ生成をサポートしているものを取得
+        genai.configure(api_key=api_key)
+        # ホワイトリスト方式：1.5系と1.0系のみ許可（2.0, 2.5, 3.0等の新版は無料枠が不安定なため除外）
         available_models = [
             m.name for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
+            and ("1.5" in m.name or "1.0" in m.name or m.name == "models/gemini-pro")
         ]
         
-        # --- ▼ 優先順位リストを最新化（1.5 Pro / Flash を最優先に） ▼ ---
+        # 優先順位リスト（安定動作が確認されているモデルのみ）
         preferred_models = [
             "models/gemini-1.5-pro",          # 最も賢いモデル（推奨）
             "models/gemini-1.5-pro-latest",
             "models/gemini-1.5-flash",        # 高速版
             "models/gemini-1.5-flash-latest",
-            "models/gemini-1.5-flash-8b",     # 軽量版
-            "models/gemini-pro"
+            "models/gemini-pro"               # 完全なフォールバック
         ]
         
         selected_model = None
@@ -140,25 +146,23 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
                 selected_model = p
                 break
                 
-        # 優先順位のものが見つからなければ、利用可能な最初のモデルを使用
+        # 優先順位のものが見つからなければ、利用可能な最初のモデル（2.0以外）を使用
         if not selected_model and available_models:
             selected_model = available_models[0]
             
         if not selected_model:
-            raise Exception("コンテキスト生成をサポートするGeminiモデルが利用できません。")
+            raise Exception("有効なGemini生成モデルが見つかりません（無料枠制限の可能性）。")
             
-        # パスプレフィックス "models/" を除去してモデル名を取得（念のため）
+        # パスプレフィックス "models/" を除去してモデル名を取得し、エラー耐性を高める
         model_name = selected_model.replace("models/", "")
         
-        # モデル初期化（修正：再度 models/ をつけて指定するほうが安定する場合があるため調整）
         try:
             model = genai.GenerativeModel(selected_model) # 正式名称でトライ
-        except:
+        except Exception:
             model = genai.GenerativeModel(model_name) # ダメなら短い名前でトライ
 
         prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text)
-        
-        # 生成実行
+
         response = model.generate_content(prompt)
         return response.text
 
@@ -166,6 +170,7 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         error_msg = f"⚠️ Gemini API エラー: {str(e)}\n\n"
         error_msg += _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
         return error_msg
+
 
 def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                                 volume_surge_stocks: pd.DataFrame) -> str:
@@ -219,6 +224,5 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
 
     if len(lines) <= 2:
         lines.append("データが不足しているため、分析を実行できません。\n「データを最新化」ボタンを押してデータを取得してください。")
-        
-    return "\n".join(lines)
 
+    return "\n".join(lines)
