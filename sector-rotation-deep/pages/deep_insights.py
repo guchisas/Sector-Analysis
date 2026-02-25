@@ -8,6 +8,7 @@ AIインサイトページ
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,37 +38,45 @@ def render():
     oversold = get_oversold_stocks()
     volume_surge = get_volume_surge_stocks()
 
-    # AI再分析ボタン
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown(f"**分析対象日: {latest_date}**")
-    with col2:
-        if st.button("🔄 AI再分析", use_container_width=True, type="primary"):
-            # キャッシュをクリアして再分析
-            if "ai_insight" in st.session_state:
-                del st.session_state["ai_insight"]
-            if "ai_insight_date" in st.session_state:
-                del st.session_state["ai_insight_date"]
-            st.rerun()
-
     # ===== AIレポート =====
     st.markdown(section_header("AI深層分析レポート", "🧠"), unsafe_allow_html=True)
 
-    # AI分析実行（キャッシュ利用）
-    if "ai_insight" not in st.session_state or st.session_state.get("ai_insight_date") != latest_date:
-        with st.spinner("🤖 Gemini AIが分析中...（30秒ほどかかる場合があります）"):
-            news_text = fetch_news_summary(max_articles=15)
-            insight = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
-            st.session_state["ai_insight"] = insight
-            st.session_state["ai_insight_date"] = latest_date
+    # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
+    @st.cache_data(ttl=3600, show_spinner="🤖 Gemini AIが分析中...（30秒ほどかかる場合があります）")
+    def _cached_full_ai_insight(_date: str):
+        """日付をキーにして、日付が変わったらキャッシュを更新する"""
+        news_text = fetch_news_summary(max_articles=15)
+        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
+        return result, datetime.now().strftime("%H:%M")
+
+    insight, analyzed_at = _cached_full_ai_insight(latest_date)
+
+    # 次回更新可能時刻を計算
+    try:
+        h, m = map(int, analyzed_at.split(":"))
+        next_update = f"{(h + 1) % 24:02d}:{m:02d}"
+    except Exception:
+        next_update = "1時間後"
+
+    # AI再分析ボタン（注意書き付き）
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"**分析対象日: {latest_date}**")
+        st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新可能: {next_update} 以降")
+    with col2:
+        if st.button("🔄 AI再分析", use_container_width=True, type="primary"):
+            _cached_full_ai_insight.clear()
+            st.rerun()
+
+    st.info(f"⚠️ この分析は全ユーザーで共有されています。「再分析」ボタンを押すとAPI制限を消費するため、{next_update} 以降に押してください。")
 
     # レポート全文表示
     st.markdown(f"""
     <div class="ai-insight-card">
-        <h4>🧠 Gemini AI 分析レポート <span style="color:#666; font-size:0.8rem;">{latest_date}</span></h4>
+        <h4>🧠 Gemini AI 分析レポート <span style="color:#666; font-size:0.8rem;">{latest_date} {analyzed_at}時点</span></h4>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown(st.session_state.get("ai_insight", ""))
+    st.markdown(insight)
 
     st.markdown("---")
 

@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -104,12 +104,12 @@ def render():
     # ===== 市場概況（地合い）エリア =====
     st.markdown(section_header("市場概況（地合い）", "🌐"), unsafe_allow_html=True)
 
-    # キャッシュされた市場データの取得
-    if "market_overview" not in st.session_state:
-        with st.spinner("📡 主要指数を取得中..."):
-            st.session_state["market_overview"] = fetch_market_overview()
+    # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
+    @st.cache_data(ttl=3600, show_spinner="📡 主要指数を取得中...")
+    def _cached_market_overview():
+        return fetch_market_overview()
 
-    market_data = st.session_state["market_overview"]
+    market_data = _cached_market_overview()
 
     # CSS Gridベースのレスポンシブパネルを1ブロックのHTMLとして出力
     st.markdown(render_market_panel_html(market_data), unsafe_allow_html=True)
@@ -130,24 +130,24 @@ def render():
     # ===== AIインサイト概要 =====
     st.markdown(section_header("本日のAIインサイト", "🧠"), unsafe_allow_html=True)
 
-    # キャッシュされたAI分析結果の取得
-    if "ai_insight" not in st.session_state:
-        with st.spinner("🤖 AI分析を実行中..."):
-            news_text = fetch_news_summary(max_articles=10)
-            insight = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
-            st.session_state["ai_insight"] = insight
-            st.session_state["ai_insight_date"] = latest_date
+    # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
+    @st.cache_data(ttl=3600, show_spinner="🤖 AI分析を実行中...")
+    def _cached_ai_insight(_date: str):
+        """日付をキーにして、日付が変わったらキャッシュを更新する"""
+        news_text = fetch_news_summary(max_articles=10)
+        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
+        # 分析実行時刻を戻り値に含める
+        return result, datetime.now().strftime("%H:%M")
 
-    # 日付が変わった場合はキャッシュを更新
-    if st.session_state.get("ai_insight_date") != latest_date:
-        with st.spinner("🤖 AI分析を更新中..."):
-            news_text = fetch_news_summary(max_articles=10)
-            insight = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
-            st.session_state["ai_insight"] = insight
-            st.session_state["ai_insight_date"] = latest_date
+    ai_text, analyzed_at = _cached_ai_insight(latest_date)
 
-    # AIインサイトカード表示
-    ai_text = st.session_state.get("ai_insight", "")
+    # 次回更新可能時刻を計算
+    try:
+        h, m = map(int, analyzed_at.split(":"))
+        next_update = f"{(h + 1) % 24:02d}:{m:02d}"
+    except Exception:
+        next_update = "1時間後"
+
     # 概要のみ表示（最初の500文字）
     summary_text = ai_text[:500] + "..." if len(ai_text) > 500 else ai_text
     st.markdown(f"""
@@ -158,7 +158,7 @@ def render():
         </div>
     </div>
     """, unsafe_allow_html=True)
-    st.caption("💡 詳細は「AIインサイト」ページで確認できます")
+    st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新: {next_update} 以降 ｜ 詳細は「AIインサイト」ページへ")
 
     # ===== セクター別出来高ヒートマップ =====
     st.markdown(section_header("セクター別出来高急増率ヒートマップ", "🗺️"), unsafe_allow_html=True)

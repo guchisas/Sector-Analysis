@@ -153,9 +153,10 @@ def _empty_result(info: dict) -> dict:
 def render_market_panel_html(market_data: Dict[str, dict]) -> str:
     """
     市場概況パネルのHTMLを生成する（CSS Gridレスポンシブ対応）
-    st.columns を使わず、単一のHTML/CSSブロックとして出力する
+    ※ StreamlitのmarkdownパーサーはHTML中の空行で解釈を中断するため、
+      空行を含まないコンパクトなHTMLを生成する
     """
-    cards_html = ""
+    cards = []
 
     for key in ["nikkei", "topix", "growth250", "usdjpy"]:
         data = market_data.get(key, {})
@@ -171,7 +172,6 @@ def render_market_panel_html(market_data: Dict[str, dict]) -> str:
             signal_class = data.get("signal_class", "signal-neutral")
             signal_label = data.get("signal_label", "⚖️ 中立")
 
-            # RSIバーの色
             if rsi_val >= 70:
                 bar_color = "#FF4B4B"
             elif rsi_val <= 30:
@@ -180,28 +180,32 @@ def render_market_panel_html(market_data: Dict[str, dict]) -> str:
                 bar_color = "#00D26A"
 
             rsi_pct = min(max(rsi_val, 0), 100)
+            icon = data.get("icon", "")
+            name = data.get("name", "")
+            chg_str = f"{chg_sign}{chg:,.2f} ({chg_sign}{chg_pct:.2f}%)"
+            rsi_text = f"RSI(14): {rsi_val:.1f} ｜ 乖離率: {sma_dev:+.1f}%"
 
-            cards_html += f"""
-            <div class="market-card {signal_class}">
-                <div class="mc-name">{data.get('icon', '')} {data.get('name', '')}</div>
-                <div class="mc-price">{price_str}</div>
-                <div class="mc-change" style="color:{chg_color};">
-                    {chg_sign}{chg:,.2f} ({chg_sign}{chg_pct:.2f}%)
-                </div>
-                <span class="mc-signal-badge {signal_class}">{signal_label}</span>
-                <div class="mc-rsi-bar">
-                    <div class="mc-rsi-fill" style="width:{rsi_pct}%; background:{bar_color};"></div>
-                </div>
-                <div class="mc-rsi-text">RSI(14): {rsi_val:.1f} ｜ 乖離率: {sma_dev:+.1f}%</div>
-            </div>
-            """
+            # 空行を一切含めずHTMLを構築
+            card = (
+                f'<div class="market-card {signal_class}">'
+                f'<div class="mc-name">{icon} {name}</div>'
+                f'<div class="mc-price">{price_str}</div>'
+                f'<div class="mc-change" style="color:{chg_color};">{chg_str}</div>'
+                f'<span class="mc-signal-badge {signal_class}">{signal_label}</span>'
+                f'<div class="mc-rsi-bar"><div class="mc-rsi-fill" style="width:{rsi_pct:.0f}%;background:{bar_color};"></div></div>'
+                f'<div class="mc-rsi-text">{rsi_text}</div>'
+                f'</div>'
+            )
         else:
-            cards_html += f"""
-            <div class="market-card signal-neutral">
-                <div class="mc-name">{data.get('icon', '')} {data.get('name', '')}</div>
-                <div class="mc-price" style="color:#555;">取得不可</div>
-                <div class="mc-change" style="color:#555;">---</div>
-            </div>
-            """
+            icon = data.get("icon", "")
+            name = data.get("name", "")
+            card = (
+                f'<div class="market-card signal-neutral">'
+                f'<div class="mc-name">{icon} {name}</div>'
+                f'<div class="mc-price" style="color:#555;">取得不可</div>'
+                f'<div class="mc-change" style="color:#555;">---</div>'
+                f'</div>'
+            )
+        cards.append(card)
 
-    return f'<div class="market-grid">{cards_html}</div>'
+    return f'<div class="market-grid">{"".join(cards)}</div>'
