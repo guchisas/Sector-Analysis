@@ -42,9 +42,10 @@ def calculate_ppo(sma_short: pd.Series, sma_long: pd.Series) -> pd.Series:
 def calculate_volume_ratio(volume: pd.Series, window: int = 5) -> pd.Series:
     """
     出来高急増率を計算する
-    当日出来高 / 5日平均出来高
+    当日出来高 / 過去5日平均出来高（当日を含まない）
     """
-    avg_volume = volume.rolling(window=window, min_periods=1).mean()
+    # shift(1) で当日を除外し、過去5日間の平均と比較する
+    avg_volume = volume.rolling(window=window, min_periods=1).mean().shift(1)
     ratio = (volume / avg_volume).replace([np.inf, -np.inf], np.nan)
     return ratio
 

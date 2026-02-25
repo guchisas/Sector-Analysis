@@ -80,8 +80,13 @@ def render():
         margin=dict(l=150, r=60, t=20, b=20),
         xaxis_title="平均RSI",
         font=dict(size=11),
+        dragmode=False,
     )
-    st.plotly_chart(fig_rsi, use_container_width=True)
+    st.plotly_chart(fig_rsi, use_container_width=True, config={
+        "scrollZoom": False,
+        "displayModeBar": False,
+        "staticPlot": True,
+    })
 
     # ===== セクター別PPO（移動平均乖離率）チャート =====
     st.markdown(section_header("セクター別 PPO（移動平均乖離率）", "📉"), unsafe_allow_html=True)
@@ -109,8 +114,13 @@ def render():
         margin=dict(l=150, r=60, t=20, b=20),
         xaxis_title="PPO (%)",
         font=dict(size=11),
+        dragmode=False,
     )
-    st.plotly_chart(fig_ppo, use_container_width=True)
+    st.plotly_chart(fig_ppo, use_container_width=True, config={
+        "scrollZoom": False,
+        "displayModeBar": False,
+        "staticPlot": True,
+    })
 
     # ===== セクター別銘柄一覧 =====
     st.markdown(section_header("セクター別銘柄一覧", "🔍"), unsafe_allow_html=True)

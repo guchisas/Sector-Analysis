@@ -175,8 +175,13 @@ def render():
             xaxis_tickangle=-45,
             yaxis_title="平均出来高倍率",
             font=dict(size=11),
+            dragmode=False,  # スワイプでのズーム・パンを無効化
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={
+            "scrollZoom": False,
+            "displayModeBar": False,
+            "staticPlot": True,  # 完全に静的表示（タッチ操作を全て無効化）
+        })
 
     # ===== 出来高急増 TOP20 =====
     st.markdown(section_header("出来高急増銘柄 TOP20", "🚀"), unsafe_allow_html=True)

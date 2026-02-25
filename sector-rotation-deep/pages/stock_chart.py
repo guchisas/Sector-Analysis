@@ -174,8 +174,12 @@ def render():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         xaxis_rangeslider_visible=False,
         font=dict(size=11),
+        dragmode=False,  # スワイプでのズーム・パンを無効化
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.05)")
     fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.05)")
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={
+        "scrollZoom": False,
+        "displayModeBar": False,
+    })
