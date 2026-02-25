@@ -210,6 +210,65 @@ def get_custom_css() -> str:
         color: #CCCCCC;
         margin-bottom: 0.5rem;
     }
+
+    /* ===== 市場概況カード ===== */
+    .market-index-card {
+        background: linear-gradient(135deg, #141824 0%, #1C2233 100%);
+        border: 1px solid rgba(76, 155, 232, 0.15);
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.8rem;
+        position: relative;
+        overflow: hidden;
+    }
+    .market-index-card .index-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.3rem;
+    }
+    .market-index-card .index-name {
+        color: #8899AA;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+    .market-index-card .index-price {
+        color: #FAFAFA;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .market-index-card .index-change {
+        font-size: 0.78rem;
+        margin-top: 0.15rem;
+    }
+    .market-index-card .signal-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 12px;
+        margin-top: 0.3rem;
+        font-weight: 600;
+    }
+    .market-index-card .rsi-bar {
+        height: 3px;
+        background: #2D3748;
+        border-radius: 2px;
+        margin-top: 0.4rem;
+        position: relative;
+    }
+    .market-index-card .rsi-bar .rsi-fill {
+        height: 100%;
+        border-radius: 2px;
+        position: absolute;
+        left: 0;
+        top: 0;
+    }
+    .market-index-card .rsi-label {
+        font-size: 0.68rem;
+        color: #6B7A8D;
+        margin-top: 0.15rem;
+    }
     </style>
     """
 

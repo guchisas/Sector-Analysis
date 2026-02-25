@@ -27,6 +27,7 @@ from modules.technical_analysis import calculate_all_indicators, get_latest_indi
 from modules.jpx_stock_list import get_all_stocks, get_all_tickers, get_ticker_to_sector, get_ticker_to_name
 from modules.ai_analyzer import analyze_with_gemini
 from modules.news_fetcher import fetch_news_summary
+from modules.market_overview import fetch_market_overview
 from utils.styles import metric_card, stock_card, section_header, empty_state
 
 
@@ -99,6 +100,78 @@ def render():
     sector_summary = get_sector_summary()
     volume_surge = get_volume_surge_stocks()
     oversold = get_oversold_stocks()
+
+    # ===== 市場概況（地合い）エリア =====
+    st.markdown(section_header("市場概況（地合い）", "🌐"), unsafe_allow_html=True)
+
+    # キャッシュされた市場データの取得
+    if "market_overview" not in st.session_state:
+        with st.spinner("📡 主要指数を取得中..."):
+            st.session_state["market_overview"] = fetch_market_overview()
+
+    market_data = st.session_state["market_overview"]
+
+    idx_col1, idx_col2, idx_col3, idx_col4 = st.columns(4)
+    for col, key in zip(
+        [idx_col1, idx_col2, idx_col3, idx_col4],
+        ["nikkei", "topix", "growth250", "usdjpy"]
+    ):
+        with col:
+            data = market_data.get(key, {})
+            if data.get("price") is not None:
+                # 価格表示用フォーマット
+                price_str = data["format"].format(data["price"])
+                # 前日比
+                chg = data.get("change", 0)
+                chg_pct = data.get("change_pct", 0)
+                chg_sign = "+" if chg >= 0 else ""
+                chg_color = "#00D26A" if chg >= 0 else "#FF4B4B"
+                # RSIシグナル
+                sig = data.get("signal", {})
+                sig_label = sig.get("label", "")
+                sig_color = sig.get("color", "#888")
+                # RSI値
+                rsi_val = data.get("rsi", 50)
+                rsi_pct = min(max(rsi_val, 0), 100)  # 0-100に制約
+                # RSIバーの色
+                if rsi_val >= 70:
+                    bar_color = "#FF4B4B"
+                elif rsi_val <= 30:
+                    bar_color = "#4C9BE8"
+                else:
+                    bar_color = "#00D26A"
+                # SMA乖離率
+                sma_dev = data.get("sma_dev", 0)
+                sma_sig = data.get("sma_signal", {})
+                sma_label = sma_sig.get("label", "")
+                sma_extra = f'<div style="font-size:0.7rem; color:#6B7A8D; margin-top:0.1rem;">乖離率: {sma_dev:+.1f}% {sma_label}</div>' if sma_label else f'<div style="font-size:0.7rem; color:#6B7A8D; margin-top:0.1rem;">乖離率: {sma_dev:+.1f}%</div>'
+
+                st.markdown(f"""
+                <div class="market-index-card">
+                    <div class="index-header">
+                        <span class="index-name">{data['icon']} {data['name']}</span>
+                    </div>
+                    <div class="index-price">{price_str}</div>
+                    <div class="index-change" style="color:{chg_color};">
+                        {chg_sign}{chg:,.2f} ({chg_sign}{chg_pct:.2f}%)
+                    </div>
+                    <span class="signal-badge" style="background:{sig_color}22; color:{sig_color};">
+                        {sig_label}
+                    </span>
+                    <div class="rsi-bar">
+                        <div class="rsi-fill" style="width:{rsi_pct}%; background:{bar_color};"></div>
+                    </div>
+                    <div class="rsi-label">RSI(14): {rsi_val:.1f}</div>
+                    {sma_extra}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="market-index-card">
+                    <div class="index-name">{data.get('icon', '')} {data.get('name', '')}</div>
+                    <div class="index-price" style="color:#666;">取得失敗</div>
+                </div>
+                """, unsafe_allow_html=True)
 
     # ===== KPIカード =====
     col1, col2, col3, col4 = st.columns(4)
