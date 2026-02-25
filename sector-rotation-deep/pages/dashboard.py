@@ -166,37 +166,60 @@ def render():
     st.markdown(section_header("セクター別出来高急増率ヒートマップ", "🗺️"), unsafe_allow_html=True)
 
     if not sector_summary.empty:
-        # 出来高倍率でソート
-        chart_data = sector_summary.sort_values("avg_volume_ratio", ascending=False)
+        # 出来高倍率でソート（昇順 → 上が高い値）
+        chart_data = sector_summary.sort_values("avg_volume_ratio", ascending=True)
 
-        # カラースケールを適用
-        colors = ["#FF4B4B" if v < 1.0 else "#00D26A" for v in chart_data["avg_volume_ratio"]]
+        # 1.0倍以上 → 緑グラデ（活況）、1.0倍未満 → 赤グラデ（低調）
+        colors = [
+            f"rgba(0, 210, 106, {min(0.4 + v * 0.3, 0.95)})" if v >= 1.0
+            else f"rgba(255, 75, 75, {min(0.4 + v * 0.3, 0.85)})"
+            for v in chart_data["avg_volume_ratio"]
+        ]
 
         fig = go.Figure(data=[
             go.Bar(
-                x=chart_data["sector"],
-                y=chart_data["avg_volume_ratio"],
-                marker_color=colors,
-                text=chart_data["avg_volume_ratio"].round(2),
-                textposition="auto",
-                hovertemplate="<b>%{x}</b><br>出来高倍率: %{y:.2f}x<extra></extra>",
+                y=chart_data["sector"],
+                x=chart_data["avg_volume_ratio"],
+                orientation="h",
+                marker=dict(
+                    color=colors,
+                    line=dict(width=0),
+                ),
+                text=chart_data["avg_volume_ratio"].apply(lambda v: f"{v:.2f}x"),
+                textposition="outside",
+                textfont=dict(size=10, color="#AAA"),
+                hovertemplate="<b>%{y}</b><br>出来高倍率: %{x:.2f}x<extra></extra>",
             )
         ])
+        # 1.0倍の基準線
+        fig.add_vline(
+            x=1.0, line_dash="dot", line_color="rgba(255,255,255,0.25)", line_width=1,
+            annotation_text="1.0x", annotation_position="top",
+            annotation_font_size=9, annotation_font_color="#666",
+        )
         fig.update_layout(
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            height=400,
-            margin=dict(l=20, r=20, t=20, b=80),
-            xaxis_tickangle=-45,
-            yaxis_title="平均出来高倍率",
+            height=max(650, len(chart_data) * 26),
+            margin=dict(l=110, r=50, t=10, b=30),
+            xaxis=dict(
+                title="平均出来高倍率",
+                title_font_size=11,
+                gridcolor="rgba(255,255,255,0.04)",
+                zeroline=False,
+            ),
+            yaxis=dict(
+                tickfont=dict(size=10),
+            ),
             font=dict(size=11),
-            dragmode=False,  # スワイプでのズーム・パンを無効化
+            bargap=0.25,
+            dragmode=False,
         )
         st.plotly_chart(fig, use_container_width=True, config={
             "scrollZoom": False,
             "displayModeBar": False,
-            "staticPlot": True,  # 完全に静的表示（タッチ操作を全て無効化）
+            "staticPlot": True,
         })
 
     # ===== 出来高急増 TOP20 =====
