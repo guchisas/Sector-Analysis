@@ -4,6 +4,7 @@
 - 日経平均、TOPIX、グロース250、ドル円の主要指標を取得
 - RSI(14)ベースの加熱感シグナル判定
 - 25日移動平均線乖離率の算出
+- HTML/CSS Gridレスポンシブパネル出力
 """
 
 import yfinance as yf
@@ -16,18 +17,18 @@ from typing import Dict, Optional
 MARKET_INDICES = {
     "nikkei": {
         "ticker": "^N225",
-        "name": "日経平均株価",
+        "name": "日経平均",
         "icon": "🇯🇵",
         "format": "¥{:,.0f}",
     },
     "topix": {
-        "ticker": "^TPX",
+        "ticker": "1306.T",  # TOPIX連動ETF（指数^TPXは取得不安定のためETF代用）
         "name": "TOPIX",
         "icon": "📊",
-        "format": "{:,.2f}",
+        "format": "¥{:,.1f}",
     },
     "growth250": {
-        "ticker": "2516.T",  # 東証グロース市場250（ETF）
+        "ticker": "2516.T",  # 東証グロース市場250指数（ETF）
         "name": "グロース250",
         "icon": "🌱",
         "format": "¥{:,.0f}",
@@ -44,7 +45,7 @@ MARKET_INDICES = {
 def _calculate_rsi(series: pd.Series, period: int = 14) -> float:
     """RSI(14)を計算して最新値を返す"""
     if len(series) < period + 1:
-        return 50.0  # データ不足時は中立値を返す
+        return 50.0
 
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0)
@@ -72,73 +73,25 @@ def _calculate_sma_deviation(series: pd.Series, window: int = 25) -> float:
     if pd.isna(latest_sma) or latest_sma == 0:
         return 0.0
 
-    deviation = (latest_price - latest_sma) / latest_sma * 100
-    return float(deviation)
+    return float((latest_price - latest_sma) / latest_sma * 100)
 
 
-def get_rsi_signal(rsi: float) -> dict:
-    """RSI値から加熱感シグナルを判定する"""
-    if rsi >= 70:
-        return {
-            "label": "🔥 加熱（警戒）",
-            "color": "#FF4B4B",
-            "level": "hot",
-        }
-    elif rsi <= 30:
-        return {
-            "label": "💧 売られすぎ（反発狙い）",
-            "color": "#4C9BE8",
-            "level": "cold",
-        }
+def _get_signal_class_and_label(rsi: float, sma_dev: float) -> tuple:
+    """RSIとSMA乖離率から、CSSクラス名とシグナルラベルを返す"""
+    if rsi >= 70 or sma_dev >= 5.0:
+        return "signal-hot", "🔥 加熱"
+    elif rsi <= 30 or sma_dev <= -5.0:
+        return "signal-cold", "💧 売られすぎ"
     else:
-        return {
-            "label": "⚖️ 中立",
-            "color": "#888888",
-            "level": "neutral",
-        }
-
-
-def get_sma_signal(deviation: float) -> dict:
-    """SMA乖離率からシグナルを判定する"""
-    if deviation >= 5.0:
-        return {
-            "label": "⚠️ 高値警戒",
-            "color": "#FF6B6B",
-        }
-    elif deviation <= -5.0:
-        return {
-            "label": "📉 底値圏",
-            "color": "#4ECDC4",
-        }
-    else:
-        return {
-            "label": "",
-            "color": "#888888",
-        }
+        return "signal-neutral", "⚖️ 中立"
 
 
 def fetch_market_overview() -> Dict[str, dict]:
-    """
-    全主要指数のデータを取得し、シグナル情報を付与して返す
-
-    Returns:
-        {
-            "nikkei": {
-                "name": "日経平均株価", "icon": "🇯🇵",
-                "price": 38500.0, "change": 1.25, "change_pct": 0.5,
-                "rsi": 65.3, "sma_dev": 2.1,
-                "signal": {"label": "⚖️ 中立", "color": "#888"},
-                "sma_signal": {"label": "", "color": "#888"},
-                "format": "¥{:,.0f}",
-            },
-            ...
-        }
-    """
+    """全主要指数のデータを取得し、シグナル情報を付与して返す"""
     results = {}
 
     for key, info in MARKET_INDICES.items():
         try:
-            # yfinanceで60日分の日足データを取得（RSI計算に必要）
             ticker = yf.Ticker(info["ticker"])
             df = ticker.history(period="3mo", interval="1d")
 
@@ -149,24 +102,17 @@ def fetch_market_overview() -> Dict[str, dict]:
             close = df["Close"]
             latest_price = float(close.iloc[-1])
 
-            # 前日比の計算
+            # 前日比
             if len(close) >= 2:
                 prev_price = float(close.iloc[-2])
                 change = latest_price - prev_price
                 change_pct = (change / prev_price) * 100
             else:
-                change = 0.0
-                change_pct = 0.0
+                change, change_pct = 0.0, 0.0
 
-            # RSI(14)の計算
             rsi = _calculate_rsi(close, 14)
-
-            # 25日SMA乖離率の計算
             sma_dev = _calculate_sma_deviation(close, 25)
-
-            # シグナル生成
-            signal = get_rsi_signal(rsi)
-            sma_signal = get_sma_signal(sma_dev)
+            signal_class, signal_label = _get_signal_class_and_label(rsi, sma_dev)
 
             results[key] = {
                 "name": info["name"],
@@ -176,8 +122,8 @@ def fetch_market_overview() -> Dict[str, dict]:
                 "change_pct": change_pct,
                 "rsi": rsi,
                 "sma_dev": sma_dev,
-                "signal": signal,
-                "sma_signal": sma_signal,
+                "signal_class": signal_class,
+                "signal_label": signal_label,
                 "format": info["format"],
             }
 
@@ -198,7 +144,64 @@ def _empty_result(info: dict) -> dict:
         "change_pct": 0.0,
         "rsi": 50.0,
         "sma_dev": 0.0,
-        "signal": get_rsi_signal(50.0),
-        "sma_signal": get_sma_signal(0.0),
+        "signal_class": "signal-neutral",
+        "signal_label": "取得不可",
         "format": info["format"],
     }
+
+
+def render_market_panel_html(market_data: Dict[str, dict]) -> str:
+    """
+    市場概況パネルのHTMLを生成する（CSS Gridレスポンシブ対応）
+    st.columns を使わず、単一のHTML/CSSブロックとして出力する
+    """
+    cards_html = ""
+
+    for key in ["nikkei", "topix", "growth250", "usdjpy"]:
+        data = market_data.get(key, {})
+
+        if data.get("price") is not None:
+            price_str = data["format"].format(data["price"])
+            chg = data.get("change", 0)
+            chg_pct = data.get("change_pct", 0)
+            chg_sign = "+" if chg >= 0 else ""
+            chg_color = "#00D26A" if chg >= 0 else "#FF4B4B"
+            rsi_val = data.get("rsi", 50)
+            sma_dev = data.get("sma_dev", 0)
+            signal_class = data.get("signal_class", "signal-neutral")
+            signal_label = data.get("signal_label", "⚖️ 中立")
+
+            # RSIバーの色
+            if rsi_val >= 70:
+                bar_color = "#FF4B4B"
+            elif rsi_val <= 30:
+                bar_color = "#4C9BE8"
+            else:
+                bar_color = "#00D26A"
+
+            rsi_pct = min(max(rsi_val, 0), 100)
+
+            cards_html += f"""
+            <div class="market-card {signal_class}">
+                <div class="mc-name">{data.get('icon', '')} {data.get('name', '')}</div>
+                <div class="mc-price">{price_str}</div>
+                <div class="mc-change" style="color:{chg_color};">
+                    {chg_sign}{chg:,.2f} ({chg_sign}{chg_pct:.2f}%)
+                </div>
+                <span class="mc-signal-badge {signal_class}">{signal_label}</span>
+                <div class="mc-rsi-bar">
+                    <div class="mc-rsi-fill" style="width:{rsi_pct}%; background:{bar_color};"></div>
+                </div>
+                <div class="mc-rsi-text">RSI(14): {rsi_val:.1f} ｜ 乖離率: {sma_dev:+.1f}%</div>
+            </div>
+            """
+        else:
+            cards_html += f"""
+            <div class="market-card signal-neutral">
+                <div class="mc-name">{data.get('icon', '')} {data.get('name', '')}</div>
+                <div class="mc-price" style="color:#555;">取得不可</div>
+                <div class="mc-change" style="color:#555;">---</div>
+            </div>
+            """
+
+    return f'<div class="market-grid">{cards_html}</div>'

@@ -211,63 +211,113 @@ def get_custom_css() -> str:
         margin-bottom: 0.5rem;
     }
 
-    /* ===== 市場概況カード ===== */
-    .market-index-card {
+    /* ===== 市場概況グリッド ===== */
+    .market-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.7rem;
+        margin-bottom: 1rem;
+    }
+
+    /* --- 個別カード --- */
+    .market-card {
         background: linear-gradient(135deg, #141824 0%, #1C2233 100%);
         border: 1px solid rgba(76, 155, 232, 0.15);
         border-radius: 10px;
         padding: 0.9rem 1rem;
-        margin-bottom: 0.8rem;
-        position: relative;
-        overflow: hidden;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-    .market-index-card .index-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 0.3rem;
+    .market-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
     }
-    .market-index-card .index-name {
+
+    /* --- シグナル別の枠線 --- */
+    .market-card.signal-hot {
+        border-color: rgba(255, 75, 75, 0.45);
+        box-shadow: inset 0 0 12px rgba(255, 75, 75, 0.06);
+    }
+    .market-card.signal-cold {
+        border-color: rgba(76, 155, 232, 0.45);
+        box-shadow: inset 0 0 12px rgba(76, 155, 232, 0.06);
+    }
+    .market-card.signal-neutral {
+        border-color: rgba(100, 120, 140, 0.25);
+    }
+
+    /* --- カード内パーツ --- */
+    .market-card .mc-name {
         color: #8899AA;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         font-weight: 500;
+        margin-bottom: 0.2rem;
     }
-    .market-index-card .index-price {
+    .market-card .mc-price {
         color: #FAFAFA;
-        font-size: 1.5rem;
+        font-size: 1.45rem;
         font-weight: 700;
         line-height: 1.2;
     }
-    .market-index-card .index-change {
-        font-size: 0.78rem;
-        margin-top: 0.15rem;
+    .market-card .mc-change {
+        font-size: 0.76rem;
+        margin-top: 0.12rem;
     }
-    .market-index-card .signal-badge {
+
+    /* --- シグナルバッジ --- */
+    .market-card .mc-signal-badge {
         display: inline-block;
-        font-size: 0.72rem;
-        padding: 0.15rem 0.5rem;
+        font-size: 0.7rem;
+        padding: 0.12rem 0.5rem;
         border-radius: 12px;
-        margin-top: 0.3rem;
+        margin-top: 0.35rem;
         font-weight: 600;
     }
-    .market-index-card .rsi-bar {
+    .mc-signal-badge.signal-hot {
+        background: rgba(255, 75, 75, 0.15);
+        color: #FF4B4B;
+    }
+    .mc-signal-badge.signal-cold {
+        background: rgba(76, 155, 232, 0.15);
+        color: #4C9BE8;
+    }
+    .mc-signal-badge.signal-neutral {
+        background: rgba(136, 136, 136, 0.12);
+        color: #888888;
+    }
+
+    /* --- RSIバー --- */
+    .market-card .mc-rsi-bar {
         height: 3px;
         background: #2D3748;
         border-radius: 2px;
         margin-top: 0.4rem;
         position: relative;
     }
-    .market-index-card .rsi-bar .rsi-fill {
+    .market-card .mc-rsi-fill {
         height: 100%;
         border-radius: 2px;
         position: absolute;
         left: 0;
         top: 0;
     }
-    .market-index-card .rsi-label {
-        font-size: 0.68rem;
+    .market-card .mc-rsi-text {
+        font-size: 0.65rem;
         color: #6B7A8D;
         margin-top: 0.15rem;
+    }
+
+    /* ===== スマホ対応: 市場グリッド 2x2 ===== */
+    @media (max-width: 768px) {
+        .market-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+        .market-card .mc-price {
+            font-size: 1.15rem;
+        }
+        .market-card {
+            padding: 0.7rem 0.8rem;
+        }
     }
     </style>
     """
