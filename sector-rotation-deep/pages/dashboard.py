@@ -101,6 +101,13 @@ def render():
     volume_surge = get_volume_surge_stocks()
     oversold = get_oversold_stocks()
 
+    # 現在のJST時刻と最終更新情報をヘッダー下に表示
+    from datetime import timezone, timedelta as td
+    jst = timezone(td(hours=9))
+    now_jst = datetime.now(jst)
+    next_hour = f"{(now_jst.hour + 1) % 24:02d}:{now_jst.minute:02d}"
+    st.caption(f"📅 データ: {latest_date} ｜ 🕐 現在 {now_jst.strftime('%H:%M')} (JST) ｜ 次回更新: {next_hour} 以降")
+
     # ===== 市場概況（地合い）エリア =====
     st.markdown(section_header("市場概況（地合い）", "🌐"), unsafe_allow_html=True)
 
