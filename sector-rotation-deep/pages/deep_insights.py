@@ -47,7 +47,10 @@ def render():
         """日付をキーにして、日付が変わったらキャッシュを更新する"""
         news_text = fetch_news_summary(max_articles=15)
         result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
-        return result, datetime.now().strftime("%H:%M")
+        # 日本時間（JST = UTC+9）で記録
+        from datetime import timezone, timedelta as td
+        jst = timezone(td(hours=9))
+        return result, datetime.now(jst).strftime("%H:%M")
 
     insight, analyzed_at = _cached_full_ai_insight(latest_date)
 
