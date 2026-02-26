@@ -38,12 +38,19 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
     sector_text = "【全33業種のセクター別データ】\n"
     if not sector_summary.empty:
         for _, row in sector_summary.iterrows():
+            avg_rsi = row.get('avg_rsi', 0) if pd.notna(row.get('avg_rsi')) else 0
+            avg_vr = row.get('avg_volume_ratio', 0) if pd.notna(row.get('avg_volume_ratio')) else 0
+            avg_pct = row.get('avg_percent_change', 0) if pd.notna(row.get('avg_percent_change')) else 0
+            trading_val = row.get('trading_value', 0) if pd.notna(row.get('trading_value')) else 0
+            stock_count = row.get('stock_count', 0)
+
             sector_text += (
                 f"- {row['sector']}: "
-                f"平均RSI={row.get('avg_rsi', 'N/A'):.1f}, "
-                f"平均出来高倍率={row.get('avg_volume_ratio', 'N/A'):.2f}, "
-                f"平均PPO={row.get('avg_ppo', 'N/A'):.2f}, "
-                f"銘柄数={row.get('stock_count', 0)}\n"
+                f"前日比={avg_pct:+.2f}%, "
+                f"平均出来高倍率={avg_vr:.2f}x, "
+                f"売買代金={trading_val:,.0f}, "
+                f"平均RSI={avg_rsi:.1f}, "
+                f"銘柄数={stock_count}\n"
             )
     else:
         sector_text += "データなし\n"
