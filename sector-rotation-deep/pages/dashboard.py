@@ -277,64 +277,95 @@ def render():
     st.markdown(_insight_html, unsafe_allow_html=True)
     st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新: {next_update} 以降 ｜ 詳細は「AIインサイト」ページへ")
 
-    # ===== セクター別出来高(天気図) =====
-    st.markdown(section_header("セクターヒートマップ - 資金の流入・流出", "🗺️"), unsafe_allow_html=True)
+    # ===== セクター別 騰落率ランキング =====
+    st.markdown(section_header("セクター別 騰落率ランキング - 資金の流入・流出", "🏆"), unsafe_allow_html=True)
 
     if not sector_summary.empty:
+        # データの整形
         chart_data = sector_summary.copy()
+        chart_data["percent_change_fmt"] = chart_data["avg_percent_change"].apply(lambda x: f"{x:+.2f}%")
+        chart_data["volume_ratio_fmt"] = chart_data["avg_volume_ratio"].apply(lambda x: f"{x:.2f}x")
+        
+        # 騰落率で降順にソート
+        chart_data = chart_data.sort_values("avg_percent_change", ascending=False)
+        
+        # --------------------------------------------------
+        # Top 5 / Worst 5 チャート (Altair)
+        # --------------------------------------------------
+        winners = chart_data.head(5).copy()
+        
+        # Worst 5 は昇順（ワースト1位が一番上に来るようにする）
+        losers = chart_data.tail(5).copy()
+        losers = losers.sort_values("avg_percent_change", ascending=True)
 
-        # Finviz風のカラースケール: -3%(緑/青系) 〜 0%(黒/灰) 〜 +3%(赤系)
-        # ※日本株の慣習に合わせ、プラス(上昇)=赤、マイナス(下落)=緑 とします
-        fig = px.treemap(
-            chart_data,
-            path=[px.Constant("全セクター"), 'sector'],
-            values='trading_value',         # サイズ: 推定売買代金
-            color='avg_percent_change',     # 色: 前日比騰落率
-            color_continuous_scale=[
-                [0.0, "rgb(0, 210, 106)"],   # マイナス下限（強い緑）
-                [0.3, "rgb(60, 130, 80)"],   # マイナス途中（暗い緑）
-                [0.5, "rgb(40, 40, 40)"],    # 0%付近（黒グレー）
-                [0.7, "rgb(180, 70, 70)"],   # プラス途中（暗い赤）
-                [1.0, "rgb(255, 75, 75)"],   # プラス上限（強い赤）
-            ],
-            color_continuous_midpoint=0.0,
-            range_color=[-3.0, 3.0],         # ±3%で色が飽和
-            custom_data=['avg_percent_change', 'avg_volume_ratio', 'trading_value', 'stock_count']
-        )
+        import altair as alt
 
-        # テキスト表示: セクター名 + 前日比 + 強さ(出来高倍率)
-        fig.update_traces(
-            textinfo="label+text",
-            texttemplate=(
-                "<b>%{label}</b><br>"
-                "前日比: %{customdata[0]:+.2f}%<br>"
-                "強さ: %{customdata[1]:.2f}x"
-            ),
-            hovertemplate=(
-                "<b>%{label}</b><br>"
-                "前日比: %{customdata[0]:+.2f}%<br>"
-                "出来高倍率: %{customdata[1]:.2f}x<br>"
-                "推定売買代金: %{customdata[2]:,.0f}<br>"
-                "銘柄数: %{customdata[3]}<extra></extra>"
-            ),
-            marker=dict(line=dict(width=2, color="#1a1a2e")),
-        )
+        col_win, col_lose = st.columns(2)
 
-        fig.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=600,
-            margin=dict(l=10, r=10, t=30, b=10),
-            coloraxis_colorbar=dict(
-                title="出来高倍率",
-                thicknessmode="pixels", thickness=15,
-                lenmode="pixels", len=300,
-                yanchor="middle", y=0.5,
-                ticks="outside", ticksuffix="x",
-            )
+        with col_win:
+            st.markdown("<h4 style='color:#FF4B4B; margin-bottom:10px;'>🔥 上昇トップ5 (Winners)</h4>", unsafe_allow_html=True)
+            if not winners.empty and winners["avg_percent_change"].max() > 0:
+                base_w = alt.Chart(winners).encode(
+                    y=alt.Y("sector:N", sort="-x", axis=alt.Axis(title="", labels=False, ticks=False, domain=False)),
+                    x=alt.X("avg_percent_change:Q", axis=alt.Axis(title="", labels=False, ticks=False, grid=False, domain=False))
+                )
+                # バー (右方向、エンジ/赤系)
+                bars_w = base_w.mark_bar(color="#FF4B4B", cornerRadiusEnd=4, height=alt.Step(32))
+                # 騰落率テキスト (バーの右端の外側)
+                text_w = base_w.mark_text(align="left", dx=4, color="white", fontWeight="bold").encode(text="percent_change_fmt:N")
+                # セクター名テキスト (バーの根元=内側左端)
+                label_w = base_w.mark_text(align="left", dx=4, color="white").encode(x=alt.value(0), text="sector:N")
+                
+                fig_w = (bars_w + text_w + label_w).configure_view(strokeWidth=0).properties(height=alt.Step(32))
+                st.altair_chart(fig_w, use_container_width=True)
+            else:
+                st.info("目立った上昇セクターはありません。")
+                
+        with col_lose:
+            st.markdown("<h4 style='color:#00D26A; margin-bottom:10px;'>🧊 下落ワースト5 (Losers)</h4>", unsafe_allow_html=True)
+            if not losers.empty and losers["avg_percent_change"].min() < 0:
+                base_l = alt.Chart(losers).encode(
+                    y=alt.Y("sector:N", sort="x", axis=alt.Axis(title="", labels=False, ticks=False, domain=False)),
+                    x=alt.X("avg_percent_change:Q", axis=alt.Axis(title="", labels=False, ticks=False, grid=False, domain=False))
+                )
+                # バー (左方向、青緑/Green系)
+                bars_l = base_l.mark_bar(color="#00D26A", cornerRadiusEnd=4, height=alt.Step(32))
+                # 騰落率テキスト (バーの左端の外側)
+                text_l = base_l.mark_text(align="right", dx=-4, color="white", fontWeight="bold").encode(text="percent_change_fmt:N")
+                # セクター名テキスト (バーの根元=内側右端)
+                label_l = base_l.mark_text(align="right", dx=-4, color="white").encode(x=alt.value(0), text="sector:N")
+                
+                fig_l = (bars_l + text_l + label_l).configure_view(strokeWidth=0).properties(height=alt.Step(32))
+                st.altair_chart(fig_l, use_container_width=True)
+            else:
+                st.info("目立った下落セクターはありません。")
+                
+        # --------------------------------------------------
+        # 全33業種一覧リスト (DataFrame + Style Bar)
+        # --------------------------------------------------
+        st.markdown("<h4 style='margin-top:20px;'>📋 全33業種 騰落率一覧</h4>", unsafe_allow_html=True)
+        
+        display_df = chart_data[["sector", "avg_percent_change", "avg_volume_ratio", "stock_count"]].copy()
+        display_df.columns = ["セクター", "前日比 (%)", "出来高倍率 (x)", "銘柄数"]
+        
+        # df.style.bar() 機能を利用して表の中に騰落率の横棒グラフを描画する
+        styled_df = display_df.style.format({
+            "前日比 (%)": "{:+.2f}%",
+            "出来高倍率 (x)": "{:.2f}x",
+            "銘柄数": "{:d}"
+        }).bar(
+            subset=["前日比 (%)"],
+            align="mid",  # 0を中央にする
+            # マイナスは緑系、プラスは赤系の色で塗り分ける
+            color=["rgba(0, 210, 106, 0.4)", "rgba(255, 75, 75, 0.4)"]
         )
-        st.plotly_chart(fig, use_container_width=True)
+        
+        st.dataframe(
+            styled_df,
+            hide_index=True,
+            use_container_width=True,
+            height=450  # スクロール対応の高さ確保
+        )
 
     # ===== 出来高急増 TOP20 =====
     st.markdown(section_header("出来高急増銘柄 TOP20", "🚀"), unsafe_allow_html=True)
