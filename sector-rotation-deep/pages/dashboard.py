@@ -140,7 +140,56 @@ def render():
     # --- HTMLカード（閉じた状態のサマリー）+ Expander内にミニチャート ---
     st.markdown(render_market_panel_html(market_data), unsafe_allow_html=True)
 
-    # Expander型ミニチャート（4指数を2列・ローソク足で表示）
+    # ===== ミニチャート（日足/週足/月足 + 移動平均線） =====
+    def _resample_ohlc(dates, opens, highs, lows, closes, freq):
+        """日足OHLCデータを週足/月足にリサンプリングする"""
+        df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows, "Close": closes},
+                          index=pd.to_datetime(dates))
+        resampled = df.resample(freq).agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"}).dropna()
+        return resampled
+
+    def _build_candlestick_with_ma(df_ohlc, ma_periods, display_bars):
+        """ローソク足 + 移動平均線のPlotly Figureを返す"""
+        # 表示用に末尾から切り出し（MA計算は全データで実行）
+        ma_colors = ["#FFD700", "#FF4B4B", "#00D26A"]  # 短期:黄, 中期:赤, 長期:緑
+        ma_names = ["短期", "中期", "長期"]
+
+        # MAを全期間で計算
+        ma_lines = []
+        for p in ma_periods:
+            ma_lines.append(df_ohlc["Close"].rolling(window=p).mean())
+
+        # 表示範囲を切り出し
+        show_df = df_ohlc.tail(display_bars)
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(
+            x=show_df.index, open=show_df["Open"], high=show_df["High"],
+            low=show_df["Low"], close=show_df["Close"],
+            increasing_line_color="#FF4B4B", increasing_fillcolor="rgba(255,75,75,0.7)",
+            decreasing_line_color="#00D26A", decreasing_fillcolor="rgba(0,210,106,0.7)",
+            name="価格",
+        ))
+        for idx_ma, (ma, p) in enumerate(zip(ma_lines, ma_periods)):
+            ma_show = ma.reindex(show_df.index)
+            fig.add_trace(go.Scatter(
+                x=show_df.index, y=ma_show, mode="lines",
+                line=dict(color=ma_colors[idx_ma], width=1.2),
+                name=f"{ma_names[idx_ma]}({p})",
+            ))
+
+        y_min = float(show_df["Low"].min()) * 0.997
+        y_max = float(show_df["High"].max()) * 1.003
+        fig.update_layout(
+            template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            height=280, margin=dict(l=5, r=5, t=10, b=20),
+            xaxis=dict(rangeslider_visible=False, tickfont=dict(size=9)),
+            yaxis=dict(range=[y_min, y_max], tickfont=dict(size=9), gridcolor="rgba(255,255,255,0.06)"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=9)),
+            dragmode=False,
+        )
+        return fig
+
+    # --- Expander型ミニチャート ---
     idx_keys = ["nikkei", "topix", "growth250", "usdjpy"]
     cols_chart = st.columns(2)
     for i, key in enumerate(idx_keys):
@@ -154,31 +203,23 @@ def render():
         icon = data.get("icon", "📊")
 
         with cols_chart[i % 2]:
-            with st.expander(f"{icon} {name} — 過去1ヶ月チャート", expanded=False):
-                if h_close and len(h_close) > 1:
-                    # ローソク足チャート（陽線=赤、陰線=緑）
-                    candle_fig = go.Figure(data=[go.Candlestick(
-                        x=h_dates,
-                        open=h_open, high=h_high, low=h_low, close=h_close,
-                        increasing_line_color="#FF4B4B",  # 陽線: 赤
-                        increasing_fillcolor="rgba(255, 75, 75, 0.7)",
-                        decreasing_line_color="#00D26A",  # 陰線: 緑
-                        decreasing_fillcolor="rgba(0, 210, 106, 0.7)",
-                    )])
-                    # Y軸をデータ範囲に自動フィット（ゼロ始まりにしない）
-                    y_min = min(h_low) * 0.998
-                    y_max = max(h_high) * 1.002
-                    candle_fig.update_layout(
-                        template="plotly_dark",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        height=220,
-                        margin=dict(l=5, r=5, t=10, b=20),
-                        xaxis=dict(rangeslider_visible=False, tickfont=dict(size=9)),
-                        yaxis=dict(range=[y_min, y_max], tickfont=dict(size=9), gridcolor="rgba(255,255,255,0.06)"),
-                        dragmode=False,
+            with st.expander(f"{icon} {name} チャート", expanded=False):
+                if h_close and len(h_close) > 10:
+                    # 時間足切替
+                    tf = st.radio("時間足", ["日足", "週足", "月足"], horizontal=True, key=f"tf_{key}")
+                    daily_df = pd.DataFrame(
+                        {"Open": h_open, "High": h_high, "Low": h_low, "Close": h_close},
+                        index=pd.to_datetime(h_dates)
                     )
-                    st.plotly_chart(candle_fig, use_container_width=True, config={"displayModeBar": False})
+                    if tf == "日足":
+                        chart_fig = _build_candlestick_with_ma(daily_df, [5, 25, 75], 60)
+                    elif tf == "週足":
+                        weekly_df = daily_df.resample("W").agg({"Open":"first","High":"max","Low":"min","Close":"last"}).dropna()
+                        chart_fig = _build_candlestick_with_ma(weekly_df, [13, 26, 52], 52)
+                    else:
+                        monthly_df = daily_df.resample("ME").agg({"Open":"first","High":"max","Low":"min","Close":"last"}).dropna()
+                        chart_fig = _build_candlestick_with_ma(monthly_df, [12, 24, 60], 60)
+                    st.plotly_chart(chart_fig, use_container_width=True, config={"displayModeBar": False})
                 else:
                     st.caption("ヒストリカルデータを取得できませんでした。")
 
@@ -200,97 +241,81 @@ def render():
     except Exception:
         next_update = "1時間後"
 
-    # 構造化サマリーを抽出して表示
-    def _extract_summary(text: str) -> dict:
-        """AIレポートからテーマ・理由・おすすめセクターを抽出する"""
-        import re
-        result = {"theme": "", "sentiment": "", "recommended": ""}
-        
-        # テーマ抽出: 「市場のテーマ:」直後の文を取得
-        theme_match = re.search(r'[\*]*市場のテーマ[：:][\*]*\s*(.+?)(?:\n|$)', text)
-        if theme_match:
-            result["theme"] = theme_match.group(1).strip().replace('**', '').replace('*', '')[:120]
-        
-        # センチメント抽出
-        sent_match = re.search(r'[\*]*センチメント[：:][\*]*\s*(.+?)(?:\n|$)', text)
-        if sent_match:
-            result["sentiment"] = sent_match.group(1).strip().replace('**', '').replace('*', '')[:120]
-        
-        # 注目銘柄/おすすめセクター抽出
-        rec_match = re.search(r'[\*]*(?:注目銘柄|主役セクター|資金の流れ)[：:][\*]*\s*(.+?)(?:\n|$)', text)
-        if rec_match:
-            result["recommended"] = rec_match.group(1).strip().replace('**', '').replace('*', '')[:120]
-        
-        # フォールバック: 何も取れなかったら先頭300文字
-        if not result["theme"] and not result["sentiment"]:
-            result["theme"] = text[:300].replace('\n', ' ').strip() + "..."
-        
-        return result
-    
-    summary = _extract_summary(ai_text)
-    
-    theme_html = f'<div style="margin-bottom:0.6rem;"><span style="color:#4C9BE8;font-weight:700;">📌 テーマ:</span> <span style="color:#E0E0E0;">{summary["theme"]}</span></div>' if summary["theme"] else ""
-    sent_html = f'<div style="margin-bottom:0.6rem;"><span style="color:#FFB347;font-weight:700;">🧭 センチメント:</span> <span style="color:#E0E0E0;">{summary["sentiment"]}</span></div>' if summary["sentiment"] else ""
-    rec_html = f'<div><span style="color:#00D26A;font-weight:700;">🎯 注目:</span> <span style="color:#E0E0E0;">{summary["recommended"]}</span></div>' if summary["recommended"] else ""
-    
-    st.markdown(f"""
-    <div class="ai-insight-card">
-        <h4>⚡ AIインサイト <span style="color:#666; font-size:0.8rem;">{latest_date}</span></h4>
-        <div style="font-size:0.9rem; line-height:1.7;">
-            {theme_html}
-            {sent_html}
-            {rec_html}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # 構造化サマリー: AIレポートからテーマ・センチメント・注目セクターを抽出
+    import re as _re
+    _theme = ""
+    _sentiment = ""
+    _recommended = ""
+    _m = _re.search(r'[\*]*市場のテーマ[：:][\*]*\s*(.+?)(?:\n|$)', ai_text)
+    if _m:
+        _theme = _m.group(1).strip().replace('**', '').replace('*', '')[:150]
+    _m = _re.search(r'[\*]*センチメント[：:][\*]*\s*(.+?)(?:\n|$)', ai_text)
+    if _m:
+        _sentiment = _m.group(1).strip().replace('**', '').replace('*', '')[:150]
+    _m = _re.search(r'[\*]*(?:注目銘柄|主役セクター|資金の流れ)[：:][\*]*\s*(.+?)(?:\n|$)', ai_text)
+    if _m:
+        _recommended = _m.group(1).strip().replace('**', '').replace('*', '')[:150]
+    if not _theme and not _sentiment:
+        _theme = ai_text[:300].replace('\n', ' ').strip() + "..."
+
+    # HTMLを空行なしで結合（Streamlitのmarkdownパーサーが空行でコードブロック化するのを防止）
+    _body_parts = []
+    if _theme:
+        _body_parts.append(f'📌 <b style="color:#4C9BE8">テーマ:</b> {_theme}')
+    if _sentiment:
+        _body_parts.append(f'🧭 <b style="color:#FFB347">センチメント:</b> {_sentiment}')
+    if _recommended:
+        _body_parts.append(f'🎯 <b style="color:#00D26A">注目:</b> {_recommended}')
+    _body_html = "<br>".join(_body_parts)
+
+    _insight_html = (
+        '<div class="ai-insight-card">'
+        f'<h4>⚡ AIインサイト <span style="color:#666;font-size:0.8rem">{latest_date}</span></h4>'
+        f'<div style="color:#E0E0E0;font-size:0.9rem;line-height:1.8">{_body_html}</div>'
+        '</div>'
+    )
+    st.markdown(_insight_html, unsafe_allow_html=True)
     st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新: {next_update} 以降 ｜ 詳細は「AIインサイト」ページへ")
 
     # ===== セクター別出来高(天気図) =====
-    st.markdown(section_header("セクター(天気図) - 出来高と勢い", "🗺️"), unsafe_allow_html=True)
+    st.markdown(section_header("セクターヒートマップ - 出来高倍率", "🗺️"), unsafe_allow_html=True)
 
     if not sector_summary.empty:
-        # Treemap用のデータ準備
-        # 箱の大きさ: 銘柄数(stock_count)
-        # 色: 出来高倍率(avg_volume_ratio)
         chart_data = sector_summary.copy()
-        
-        # 1.0倍を基準（中央）とした赤・緑のカラースケール
-        max_val = max(chart_data["avg_volume_ratio"].max(), 1.0)
-        min_val = min(chart_data["avg_volume_ratio"].min(), 1.0)
-        
-        # 値の範囲を調整し、1.0を中心とする
-        diff = max(abs(max_val - 1.0), abs(1.0 - min_val))
-        range_color = [1.0 - diff, 1.0 + diff] if diff > 0 else [0, 2]
-
-        # セクター名にRSI/PPO情報を付加してより情報豊富に
-        chart_data["label"] = chart_data.apply(
-            lambda r: f"{r['sector']}\n{r['avg_volume_ratio']:.2f}x | RSI {r['avg_rsi']:.0f}", axis=1
-        )
 
         fig = px.treemap(
             chart_data,
             path=[px.Constant("全セクター"), 'sector'],
             values='stock_count',
             color='avg_volume_ratio',
+            # 日本式配色: 赤=活況(高), 緑=閑散(低)
             color_continuous_scale=[
-                [0.0, "rgb(220, 38, 38)"],    # 強い赤（停滞）
-                [0.35, "rgb(255, 130, 100)"],  # オレンジ寄り
-                [0.5, "rgb(60, 60, 60)"],      # 中央（基準=1.0）
-                [0.65, "rgb(100, 220, 140)"],   # ライトグリーン
-                [1.0, "rgb(0, 200, 83)"],      # 強い緑（活況）
+                [0.0, "rgb(34, 139, 34)"],     # 濃い緑（閑散）
+                [0.3, "rgb(144, 238, 144)"],   # ライトグリーン
+                [0.5, "rgb(255, 255, 200)"],   # 淡い黄（基準）
+                [0.7, "rgb(255, 140, 105)"],   # サーモンピンク
+                [1.0, "rgb(220, 20, 20)"],     # 濃い赤（活況）
             ],
             color_continuous_midpoint=1.0,
-            range_color=range_color,
+            # range_color を指定しない→その日のデータの最小値・最大値で動的にスケール
             custom_data=['avg_volume_ratio', 'stock_count', 'avg_rsi']
         )
-        
+
+        # タイル内: セクター名 + 出来高倍率のみ（簡潔に）
+        # 詳細はホバー時のツールチップで表示
         fig.update_traces(
             textinfo="label+text",
-            texttemplate="<b>%{label}</b><br>出来高: %{customdata[0]:.2f}x<br>RSI: %{customdata[2]:.0f} | 銘柄: %{customdata[1]}",
-            hovertemplate="<b>%{label}</b><br>出来高倍率: %{customdata[0]:.2f}x<br>平均RSI: %{customdata[2]:.1f}<br>銘柄数: %{customdata[1]}<extra></extra>",
-            marker=dict(line=dict(width=2, color="#222")),
+            texttemplate="<b>%{label}</b><br>%{customdata[0]:.2f}x",
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "出来高倍率: %{customdata[0]:.2f}x<br>"
+                "平均RSI: %{customdata[2]:.1f}<br>"
+                "銘柄数: %{customdata[1]}"
+                "<extra></extra>"
+            ),
+            marker=dict(line=dict(width=2, color="#1a1a2e")),
         )
-        
+
         fig.update_layout(
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
@@ -303,7 +328,6 @@ def render():
                 lenmode="pixels", len=300,
                 yanchor="middle", y=0.5,
                 ticks="outside", ticksuffix="x",
-                dtick=0.2
             )
         )
         st.plotly_chart(fig, use_container_width=True)

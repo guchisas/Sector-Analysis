@@ -93,7 +93,7 @@ def fetch_market_overview() -> Dict[str, dict]:
     for key, info in MARKET_INDICES.items():
         try:
             ticker = yf.Ticker(info["ticker"])
-            df = ticker.history(period="3mo", interval="1d")
+            df = ticker.history(period="5y", interval="1d")
 
             if df.empty or "Close" not in df.columns:
                 results[key] = _empty_result(info)
@@ -114,9 +114,7 @@ def fetch_market_overview() -> Dict[str, dict]:
             sma_dev = _calculate_sma_deviation(close, 25)
             signal_class, signal_label = _get_signal_class_and_label(rsi, sma_dev)
 
-            # ミニチャート用: 過去1ヶ月分のOHLCデータ（ローソク足用）
-            ohlc = df.tail(22)
-
+            # チャート用: 全日足OHLCデータ（日足/週足/月足+MA計算用）
             results[key] = {
                 "name": info["name"],
                 "icon": info["icon"],
@@ -128,11 +126,11 @@ def fetch_market_overview() -> Dict[str, dict]:
                 "signal_class": signal_class,
                 "signal_label": signal_label,
                 "format": info["format"],
-                "history_dates": [d.strftime("%m/%d") for d in ohlc.index],
-                "history_open": [float(v) for v in ohlc["Open"].values],
-                "history_high": [float(v) for v in ohlc["High"].values],
-                "history_low": [float(v) for v in ohlc["Low"].values],
-                "history_close": [float(v) for v in ohlc["Close"].values],
+                "history_dates": [d.strftime("%Y-%m-%d") for d in df.index],
+                "history_open": [float(v) for v in df["Open"].values],
+                "history_high": [float(v) for v in df["High"].values],
+                "history_low": [float(v) for v in df["Low"].values],
+                "history_close": [float(v) for v in df["Close"].values],
             }
 
         except Exception as e:
