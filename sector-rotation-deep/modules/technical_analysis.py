@@ -101,6 +101,13 @@ def get_latest_indicators(df: pd.DataFrame) -> dict:
         return {}
 
     last_row = calculated.iloc[-1]
+    
+    # 前日比 (percent_change) を計算
+    percent_change = 0.0
+    if len(calculated) >= 2:
+        prev_row = calculated.iloc[-2]
+        if pd.notna(prev_row.get("Close")) and prev_row["Close"] > 0:
+            percent_change = (last_row.get("Close", 0) - prev_row["Close"]) / prev_row["Close"] * 100
 
     return {
         "date": str(last_row.name.date()) if hasattr(last_row.name, "date") else str(last_row.name),
@@ -115,4 +122,5 @@ def get_latest_indicators(df: pd.DataFrame) -> dict:
         "sma75": round(float(last_row.get("sma75", 0)), 2) if pd.notna(last_row.get("sma75")) else None,
         "ppo": round(float(last_row.get("ppo", 0)), 2) if pd.notna(last_row.get("ppo")) else None,
         "volume_ratio": round(float(last_row.get("volume_ratio", 0)), 2) if pd.notna(last_row.get("volume_ratio")) else None,
+        "percent_change": round(float(percent_change), 2),
     }

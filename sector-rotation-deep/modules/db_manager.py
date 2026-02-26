@@ -48,9 +48,16 @@ def init_db():
             sma75 REAL,
             ppo REAL,
             volume_ratio REAL,
+            percent_change REAL,
             PRIMARY KEY (date, ticker)
         )
     """)
+
+    # 既存DBへのカラム追加（エラー無視）
+    try:
+        cursor.execute("ALTER TABLE market_data ADD COLUMN percent_change REAL")
+    except sqlite3.OperationalError:
+        pass
 
     # パフォーマンス最適化: Indexの作成
     cursor.execute("""
@@ -84,10 +91,10 @@ def upsert_market_data(records: list[dict]):
     cursor.executemany("""
         INSERT OR REPLACE INTO market_data
         (date, ticker, name, sector, open, high, low, close, volume,
-         rsi, sma5, sma25, sma75, ppo, volume_ratio)
+         rsi, sma5, sma25, sma75, ppo, volume_ratio, percent_change)
         VALUES
         (:date, :ticker, :name, :sector, :open, :high, :low, :close, :volume,
-         :rsi, :sma5, :sma25, :sma75, :ppo, :volume_ratio)
+         :rsi, :sma5, :sma25, :sma75, :ppo, :volume_ratio, :percent_change)
     """, records)
 
     conn.commit()
@@ -138,45 +145,19 @@ def get_sector_summary(date: str = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     conn = get_connection()
-    cursor = conn.cursor()
-    # 前営業日を取得して前日比を計算できるようにする
-    cursor.execute("SELECT MAX(date) FROM market_data WHERE date < ?", (date,))
-    prev_date_row = cursor.fetchone()
-    prev_date = prev_date_row[0] if prev_date_row else None
-
-    if prev_date:
-        query = """
-            SELECT 
-                t1.sector,
-                COUNT(t1.ticker) as stock_count,
-                AVG(t1.rsi) as avg_rsi,
-                AVG(t1.volume_ratio) as avg_volume_ratio,
-                SUM(t1.close * t1.volume) as trading_value,
-                AVG((t1.close - t2.close) / t2.close * 100) as avg_percent_change
-            FROM market_data t1
-            LEFT JOIN market_data t2 ON t1.ticker = t2.ticker AND t2.date = ?
-            WHERE t1.date = ?
-            GROUP BY t1.sector
-            ORDER BY trading_value DESC
-        """
-        params = (prev_date, date)
-    else:
-        query = """
-            SELECT
-                sector,
-                COUNT(*) as stock_count,
-                AVG(rsi) as avg_rsi,
-                AVG(volume_ratio) as avg_volume_ratio,
-                SUM(close * volume) as trading_value,
-                0.0 as avg_percent_change
-            FROM market_data
-            WHERE date = ?
-            GROUP BY sector
-            ORDER BY trading_value DESC
-        """
-        params = (date,)
-
-    df = pd.read_sql_query(query, conn, params=params)
+    df = pd.read_sql_query("""
+        SELECT
+            sector,
+            COUNT(*) as stock_count,
+            AVG(rsi) as avg_rsi,
+            AVG(volume_ratio) as avg_volume_ratio,
+            SUM(close * volume) as trading_value,
+            AVG(percent_change) as avg_percent_change
+        FROM market_data
+        WHERE date = ?
+        GROUP BY sector
+        ORDER BY trading_value DESC
+    """, conn, params=(date,))
     conn.close()
     return df
 
