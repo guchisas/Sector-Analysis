@@ -278,40 +278,44 @@ def render():
     st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新: {next_update} 以降 ｜ 詳細は「AIインサイト」ページへ")
 
     # ===== セクター別出来高(天気図) =====
-    st.markdown(section_header("セクターヒートマップ - 出来高倍率", "🗺️"), unsafe_allow_html=True)
+    st.markdown(section_header("セクターヒートマップ - 資金の流入・流出", "🗺️"), unsafe_allow_html=True)
 
     if not sector_summary.empty:
         chart_data = sector_summary.copy()
 
+        # Finviz風のカラースケール: -3%(緑/青系) 〜 0%(黒/灰) 〜 +3%(赤系)
+        # ※日本株の慣習に合わせ、プラス(上昇)=赤、マイナス(下落)=緑 とします
         fig = px.treemap(
             chart_data,
             path=[px.Constant("全セクター"), 'sector'],
-            values='stock_count',
-            color='avg_volume_ratio',
-            # 日本式配色: 赤=活況(高), 緑=閑散(低)
+            values='trading_value',         # サイズ: 推定売買代金
+            color='avg_percent_change',     # 色: 前日比騰落率
             color_continuous_scale=[
-                [0.0, "rgb(34, 139, 34)"],     # 濃い緑（閑散）
-                [0.3, "rgb(144, 238, 144)"],   # ライトグリーン
-                [0.5, "rgb(255, 255, 200)"],   # 淡い黄（基準）
-                [0.7, "rgb(255, 140, 105)"],   # サーモンピンク
-                [1.0, "rgb(220, 20, 20)"],     # 濃い赤（活況）
+                [0.0, "rgb(0, 210, 106)"],   # マイナス下限（強い緑）
+                [0.3, "rgb(60, 130, 80)"],   # マイナス途中（暗い緑）
+                [0.5, "rgb(40, 40, 40)"],    # 0%付近（黒グレー）
+                [0.7, "rgb(180, 70, 70)"],   # プラス途中（暗い赤）
+                [1.0, "rgb(255, 75, 75)"],   # プラス上限（強い赤）
             ],
-            color_continuous_midpoint=1.0,
-            # range_color を指定しない→その日のデータの最小値・最大値で動的にスケール
-            custom_data=['avg_volume_ratio', 'stock_count', 'avg_rsi']
+            color_continuous_midpoint=0.0,
+            range_color=[-3.0, 3.0],         # ±3%で色が飽和
+            custom_data=['avg_percent_change', 'avg_volume_ratio', 'trading_value', 'stock_count']
         )
 
-        # タイル内: セクター名 + 出来高倍率のみ（簡潔に）
-        # 詳細はホバー時のツールチップで表示
+        # テキスト表示: セクター名 + 前日比 + 強さ(出来高倍率)
         fig.update_traces(
             textinfo="label+text",
-            texttemplate="<b>%{label}</b><br>%{customdata[0]:.2f}x",
+            texttemplate=(
+                "<b>%{label}</b><br>"
+                "前日比: %{customdata[0]:+.2f}%<br>"
+                "強さ: %{customdata[1]:.2f}x"
+            ),
             hovertemplate=(
                 "<b>%{label}</b><br>"
-                "出来高倍率: %{customdata[0]:.2f}x<br>"
-                "平均RSI: %{customdata[2]:.1f}<br>"
-                "銘柄数: %{customdata[1]}"
-                "<extra></extra>"
+                "前日比: %{customdata[0]:+.2f}%<br>"
+                "出来高倍率: %{customdata[1]:.2f}x<br>"
+                "推定売買代金: %{customdata[2]:,.0f}<br>"
+                "銘柄数: %{customdata[3]}<extra></extra>"
             ),
             marker=dict(line=dict(width=2, color="#1a1a2e")),
         )

@@ -138,19 +138,45 @@ def get_sector_summary(date: str = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     conn = get_connection()
-    df = pd.read_sql_query("""
-        SELECT
-            sector,
-            COUNT(*) as stock_count,
-            AVG(rsi) as avg_rsi,
-            AVG(volume_ratio) as avg_volume_ratio,
-            AVG(ppo) as avg_ppo,
-            AVG(close) as avg_close
-        FROM market_data
-        WHERE date = ?
-        GROUP BY sector
-        ORDER BY avg_volume_ratio DESC
-    """, conn, params=(date,))
+    cursor = conn.cursor()
+    # 前営業日を取得して前日比を計算できるようにする
+    cursor.execute("SELECT MAX(date) FROM market_data WHERE date < ?", (date,))
+    prev_date_row = cursor.fetchone()
+    prev_date = prev_date_row[0] if prev_date_row else None
+
+    if prev_date:
+        query = """
+            SELECT 
+                t1.sector,
+                COUNT(t1.ticker) as stock_count,
+                AVG(t1.rsi) as avg_rsi,
+                AVG(t1.volume_ratio) as avg_volume_ratio,
+                SUM(t1.close * t1.volume) as trading_value,
+                AVG((t1.close - t2.close) / t2.close * 100) as avg_percent_change
+            FROM market_data t1
+            LEFT JOIN market_data t2 ON t1.ticker = t2.ticker AND t2.date = ?
+            WHERE t1.date = ?
+            GROUP BY t1.sector
+            ORDER BY trading_value DESC
+        """
+        params = (prev_date, date)
+    else:
+        query = """
+            SELECT
+                sector,
+                COUNT(*) as stock_count,
+                AVG(rsi) as avg_rsi,
+                AVG(volume_ratio) as avg_volume_ratio,
+                SUM(close * volume) as trading_value,
+                0.0 as avg_percent_change
+            FROM market_data
+            WHERE date = ?
+            GROUP BY sector
+            ORDER BY trading_value DESC
+        """
+        params = (date,)
+
+    df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     return df
 
