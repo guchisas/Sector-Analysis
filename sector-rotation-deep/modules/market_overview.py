@@ -114,6 +114,9 @@ def fetch_market_overview() -> Dict[str, dict]:
             sma_dev = _calculate_sma_deviation(close, 25)
             signal_class, signal_label = _get_signal_class_and_label(rsi, sma_dev)
 
+            # ミニチャート用: 過去1ヶ月分のOHLCデータ（ローソク足用）
+            ohlc = df.tail(22)
+
             results[key] = {
                 "name": info["name"],
                 "icon": info["icon"],
@@ -125,9 +128,11 @@ def fetch_market_overview() -> Dict[str, dict]:
                 "signal_class": signal_class,
                 "signal_label": signal_label,
                 "format": info["format"],
-                # ミニチャート用: 過去1ヶ月分の終値を日付付きで返す
-                "history_1m": list(close.tail(22).values),
-                "history_dates": [d.strftime("%m/%d") for d in close.tail(22).index],
+                "history_dates": [d.strftime("%m/%d") for d in ohlc.index],
+                "history_open": [float(v) for v in ohlc["Open"].values],
+                "history_high": [float(v) for v in ohlc["High"].values],
+                "history_low": [float(v) for v in ohlc["Low"].values],
+                "history_close": [float(v) for v in ohlc["Close"].values],
             }
 
         except Exception as e:
