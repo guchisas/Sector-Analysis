@@ -311,10 +311,20 @@ def render():
                 )
                 # バー (右方向、エンジ/赤系)
                 bars_w = base_w.mark_bar(color="#FF4B4B", cornerRadiusEnd=4, size=24)
+                
                 # 騰落率テキスト (バーの右端の外側)
-                text_w = base_w.mark_text(align="left", dx=4, color="white", fontWeight="bold").encode(text="percent_change_fmt:N")
+                text_w = alt.Chart(winners).mark_text(align="left", dx=4, color="white", fontWeight="bold").encode(
+                    y=alt.Y("sector:N", sort="-x"),
+                    x=alt.X("avg_percent_change:Q"),
+                    text="percent_change_fmt:N"
+                )
+                
                 # セクター名テキスト (バーの根元=内側左端)
-                label_w = base_w.mark_text(align="left", dx=4, color="white").encode(x=alt.value(0), text="sector:N")
+                label_w = alt.Chart(winners).mark_text(align="left", dx=4, color="white").encode(
+                    y=alt.Y("sector:N", sort="-x"),
+                    x=alt.value(0),
+                    text="sector:N"
+                )
                 
                 fig_w = (bars_w + text_w + label_w).configure_view(strokeWidth=0).properties(height=200)
                 st.altair_chart(fig_w, use_container_width=True)
@@ -330,10 +340,20 @@ def render():
                 )
                 # バー (左方向、青緑/Green系)
                 bars_l = base_l.mark_bar(color="#00D26A", cornerRadiusEnd=4, size=24)
+                
                 # 騰落率テキスト (バーの左端の外側)
-                text_l = base_l.mark_text(align="right", dx=-4, color="white", fontWeight="bold").encode(text="percent_change_fmt:N")
+                text_l = alt.Chart(losers).mark_text(align="right", dx=-4, color="white", fontWeight="bold").encode(
+                    y=alt.Y("sector:N", sort="x"),
+                    x=alt.X("avg_percent_change:Q"),
+                    text="percent_change_fmt:N"
+                )
+                
                 # セクター名テキスト (バーの根元=内側右端)
-                label_l = base_l.mark_text(align="right", dx=-4, color="white").encode(x=alt.value(0), text="sector:N")
+                label_l = alt.Chart(losers).mark_text(align="right", dx=-4, color="white").encode(
+                    y=alt.Y("sector:N", sort="x"),
+                    x=alt.value(0),
+                    text="sector:N"
+                )
                 
                 fig_l = (bars_l + text_l + label_l).configure_view(strokeWidth=0).properties(height=200)
                 st.altair_chart(fig_l, use_container_width=True)
