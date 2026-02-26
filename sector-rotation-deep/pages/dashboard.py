@@ -108,6 +108,25 @@ def render():
     next_hour = f"{(now_jst.hour + 1) % 24:02d}:{now_jst.minute:02d}"
     st.caption(f"📅 データ: {latest_date} ｜ 🕐 現在 {now_jst.strftime('%H:%M')} (JST) ｜ 次回更新: {next_hour} 以降")
 
+    # ===== ステータスバー =====
+    sector_count = latest_data["sector"].nunique() if not latest_data.empty else 0
+    surge_count = len(volume_surge)
+    oversold_count = len(oversold)
+
+    st.markdown(f"""
+    <div class="status-bar">
+        <span class="sb-item">📅 <span class="sb-val">{latest_date or 'N/A'}</span></span>
+        <span class="sb-divider">│</span>
+        <span class="sb-item">🏢 銘柄 <span class="sb-val">{len(latest_data)}</span></span>
+        <span class="sb-divider">│</span>
+        <span class="sb-item">🏷️ セクター <span class="sb-val">{sector_count}</span></span>
+        <span class="sb-divider">│</span>
+        <span class="sb-item">🚀 急騰 <span class="sb-val">{surge_count}</span></span>
+        <span class="sb-divider">│</span>
+        <span class="sb-item">📉 売られすぎ <span class="sb-val">{oversold_count}</span></span>
+    </div>
+    """, unsafe_allow_html=True)
+
     # ===== 市場概況（地合い）エリア =====
     st.markdown(section_header("市場概況（地合い）", "🌐"), unsafe_allow_html=True)
 
@@ -118,37 +137,40 @@ def render():
 
     market_data = _cached_market_overview()
 
-    # CSS Gridベースのレスポンシブパネルを1ブロックのHTMLとして出力
+    # --- HTMLカード（閉じた状態のサマリー）+ Expander内にミニチャート ---
     st.markdown(render_market_panel_html(market_data), unsafe_allow_html=True)
 
-    # ===== KPIカード =====
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(metric_card("総銘柄数", str(len(latest_data)), "📋"), unsafe_allow_html=True)
-    with col2:
-        sector_count = latest_data["sector"].nunique() if not latest_data.empty else 0
-        st.markdown(metric_card("セクター数", str(sector_count), "🏷️"), unsafe_allow_html=True)
-    with col3:
-        surge_count = len(volume_surge)
-        st.markdown(metric_card("急騰銘柄数", str(surge_count), "🚀"), unsafe_allow_html=True)
-    with col4:
-        st.markdown(metric_card("最新日付", latest_date or "N/A", "📅"), unsafe_allow_html=True)
+    # Expander型ミニチャート（4指数を2列で並べる）
+    idx_keys = ["nikkei", "topix", "growth250", "usdjpy"]
+    cols_chart = st.columns(2)
+    for i, key in enumerate(idx_keys):
+        data = market_data.get(key, {})
+        history = data.get("history_1m", [])
+        history_dates = data.get("history_dates", [])
+        name = data.get("name", key)
+        icon = data.get("icon", "📊")
+
+        with cols_chart[i % 2]:
+            with st.expander(f"{icon} {name} — 過去1ヶ月チャート", expanded=False):
+                if history and len(history) > 1:
+                    chart_df = pd.DataFrame({
+                        "日付": history_dates,
+                        "終値": history,
+                    }).set_index("日付")
+                    st.area_chart(chart_df, color="#4C9BE8", height=180)
+                else:
+                    st.caption("ヒストリカルデータを取得できませんでした。")
+
+
 
     # ===== AIインサイト概要 =====
     st.markdown(section_header("本日のAIインサイト", "🧠"), unsafe_allow_html=True)
 
-    # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
-    @st.cache_data(ttl=3600, show_spinner="🤖 AI分析を実行中...")
-    def _cached_ai_insight(_date: str):
-        """日付をキーにして、日付が変わったらキャッシュを更新する"""
-        news_text = fetch_news_summary(max_articles=10)
-        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
-        # 分析実行時刻を日本時間（JST = UTC+9）で記録
-        from datetime import timezone, timedelta as td
-        jst = timezone(td(hours=9))
-        return result, datetime.now(jst).strftime("%H:%M")
-
-    ai_text, analyzed_at = _cached_ai_insight(latest_date)
+    from modules.ai_analyzer import get_shared_ai_insight
+    from modules.db_manager import get_db_last_modified
+    
+    db_version = get_db_last_modified()
+    ai_text, analyzed_at = get_shared_ai_insight(latest_date, db_version)
 
     # 次回更新可能時刻を計算
     try:
@@ -169,65 +191,57 @@ def render():
     """, unsafe_allow_html=True)
     st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新: {next_update} 以降 ｜ 詳細は「AIインサイト」ページへ")
 
-    # ===== セクター別出来高ヒートマップ =====
-    st.markdown(section_header("セクター別出来高急増率ヒートマップ", "🗺️"), unsafe_allow_html=True)
+    # ===== セクター別出来高(天気図) =====
+    st.markdown(section_header("セクター(天気図) - 出来高と勢い", "🗺️"), unsafe_allow_html=True)
 
     if not sector_summary.empty:
-        # 出来高倍率でソート（昇順 → 上が高い値）
-        chart_data = sector_summary.sort_values("avg_volume_ratio", ascending=True)
+        # Treemap用のデータ準備
+        # 箱の大きさ: 銘柄数(stock_count)
+        # 色: 出来高倍率(avg_volume_ratio)
+        chart_data = sector_summary.copy()
+        
+        # 1.0倍を基準（中央）とした赤・緑のカラースケール
+        max_val = max(chart_data["avg_volume_ratio"].max(), 1.0)
+        min_val = min(chart_data["avg_volume_ratio"].min(), 1.0)
+        
+        # 値の範囲を調整し、1.0を中心とする
+        diff = max(abs(max_val - 1.0), abs(1.0 - min_val))
+        range_color = [1.0 - diff, 1.0 + diff] if diff > 0 else [0, 2]
 
-        # 1.0倍以上 → 緑グラデ（活況）、1.0倍未満 → 赤グラデ（低調）
-        colors = [
-            f"rgba(0, 210, 106, {min(0.4 + v * 0.3, 0.95)})" if v >= 1.0
-            else f"rgba(255, 75, 75, {min(0.4 + v * 0.3, 0.85)})"
-            for v in chart_data["avg_volume_ratio"]
-        ]
-
-        fig = go.Figure(data=[
-            go.Bar(
-                y=chart_data["sector"],
-                x=chart_data["avg_volume_ratio"],
-                orientation="h",
-                marker=dict(
-                    color=colors,
-                    line=dict(width=0),
-                ),
-                text=chart_data["avg_volume_ratio"].apply(lambda v: f"{v:.2f}x"),
-                textposition="outside",
-                textfont=dict(size=10, color="#AAA"),
-                hovertemplate="<b>%{y}</b><br>出来高倍率: %{x:.2f}x<extra></extra>",
-            )
-        ])
-        # 1.0倍の基準線
-        fig.add_vline(
-            x=1.0, line_dash="dot", line_color="rgba(255,255,255,0.25)", line_width=1,
-            annotation_text="1.0x", annotation_position="top",
-            annotation_font_size=9, annotation_font_color="#666",
+        fig = px.treemap(
+            chart_data,
+            path=[px.Constant("全セクター"), 'sector'],
+            values='stock_count',
+            color='avg_volume_ratio',
+            color_continuous_scale=[[0, "rgb(255, 75, 75)"], [0.5, "rgb(40, 40, 40)"], [1, "rgb(0, 210, 106)"]],
+            color_continuous_midpoint=1.0,
+            range_color=range_color,
+            custom_data=['avg_volume_ratio', 'stock_count']
         )
+        
+        fig.update_traces(
+            textinfo="label+text",
+            texttemplate="<b>%{label}</b><br>出来高: %{customdata[0]:.2f}x<br>銘柄数: %{customdata[1]}",
+            hovertemplate="<b>%{label}</b><br>出来高倍率: %{customdata[0]:.2f}x<br>銘柄数: %{customdata[1]}<extra></extra>",
+            marker=dict(line=dict(width=1, color="#111"))
+        )
+        
         fig.update_layout(
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            height=max(650, len(chart_data) * 26),
-            margin=dict(l=110, r=50, t=10, b=30),
-            xaxis=dict(
-                title="平均出来高倍率",
-                title_font_size=11,
-                gridcolor="rgba(255,255,255,0.04)",
-                zeroline=False,
-            ),
-            yaxis=dict(
-                tickfont=dict(size=10),
-            ),
-            font=dict(size=11),
-            bargap=0.25,
-            dragmode=False,
+            height=600,
+            margin=dict(l=10, r=10, t=30, b=10),
+            coloraxis_colorbar=dict(
+                title="出来高倍率",
+                thicknessmode="pixels", thickness=15,
+                lenmode="pixels", len=300,
+                yanchor="middle", y=0.5,
+                ticks="outside", ticksuffix="x",
+                dtick=0.5
+            )
         )
-        st.plotly_chart(fig, use_container_width=True, config={
-            "scrollZoom": False,
-            "displayModeBar": False,
-            "staticPlot": True,
-        })
+        st.plotly_chart(fig, use_container_width=True)
 
     # ===== 出来高急増 TOP20 =====
     st.markdown(section_header("出来高急増銘柄 TOP20", "🚀"), unsafe_allow_html=True)

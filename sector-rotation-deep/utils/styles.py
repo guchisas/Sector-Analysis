@@ -211,6 +211,53 @@ def get_custom_css() -> str:
         margin-bottom: 0.5rem;
     }
 
+    /* ===== ステータスバー ===== */
+    .status-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0;
+        background: linear-gradient(135deg, rgba(20, 24, 36, 0.95) 0%, rgba(28, 34, 51, 0.95) 100%);
+        border: 1px solid rgba(76, 155, 232, 0.15);
+        border-radius: 10px;
+        padding: 0.55rem 1rem;
+        margin-bottom: 1rem;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+    .status-bar .sb-item {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.82rem;
+        color: #B0BEC5;
+        white-space: nowrap;
+        padding: 0.15rem 0;
+    }
+    .status-bar .sb-item .sb-val {
+        color: #FAFAFA;
+        font-weight: 700;
+    }
+    .status-bar .sb-divider {
+        color: rgba(255,255,255,0.12);
+        margin: 0 0.7rem;
+        font-size: 0.9rem;
+        user-select: none;
+    }
+    @media (max-width: 768px) {
+        .status-bar {
+            padding: 0.45rem 0.7rem;
+            gap: 0.1rem 0;
+            justify-content: center;
+        }
+        .status-bar .sb-item {
+            font-size: 0.72rem;
+        }
+        .status-bar .sb-divider {
+            margin: 0 0.4rem;
+        }
+    }
+
     /* ===== 市場概況グリッド ===== */
     .market-grid {
         display: grid;

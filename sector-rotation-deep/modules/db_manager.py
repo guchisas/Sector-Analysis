@@ -211,6 +211,16 @@ def get_all_dates() -> list[str]:
     return dates
 
 
+def get_db_last_modified() -> float:
+    """データベースファイル（またはそのディレクトリ）の最終更新日時をタイムスタンプで返す"""
+    # DBファイルが存在しない場合はディレクトリの更新日時、それもなければ0を返す
+    if os.path.exists(DB_PATH):
+        return os.path.getmtime(DB_PATH)
+    elif os.path.exists(DB_DIR):
+        return os.path.getmtime(DB_DIR)
+    return 0.0
+
+
 def db_exists() -> bool:
     """データベースファイルが存在し、データがあるかチェックする"""
     if not os.path.exists(DB_PATH):

@@ -125,6 +125,9 @@ def fetch_market_overview() -> Dict[str, dict]:
                 "signal_class": signal_class,
                 "signal_label": signal_label,
                 "format": info["format"],
+                # ミニチャート用: 過去1ヶ月分の終値を日付付きで返す
+                "history_1m": list(close.tail(22).values),
+                "history_dates": [d.strftime("%m/%d") for d in close.tail(22).index],
             }
 
         except Exception as e:

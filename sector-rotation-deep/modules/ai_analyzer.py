@@ -226,3 +226,37 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
         lines.append("データが不足しているため、分析を実行できません。\n「データを最新化」ボタンを押してデータを取得してください。")
 
     return "\n".join(lines)
+
+
+def get_shared_ai_insight(date_str: str, db_version: float):
+    """
+    ダッシュボードとAIインサイトページで共有するための分析実行・キャッシュ関数
+    db_version に db_manager.get_db_last_modified() を渡すことで、
+    DBが更新された（＝データを最新化した）タイミングでキャッシュが破棄・再実行される
+    """
+    import streamlit as st
+    from modules.db_manager import get_sector_summary, get_oversold_stocks, get_volume_surge_stocks
+    from modules.news_fetcher import fetch_news_summary
+    from datetime import datetime, timezone, timedelta
+
+    @st.cache_data(show_spinner="🤖 Gemini AIが深層分析を実行中...（30秒ほどかかる場合があります）")
+    def _run_analysis(d_str: str, v: float):
+        sector_summary = get_sector_summary(d_str)
+        oversold = get_oversold_stocks(d_str)
+        volume_surge = get_volume_surge_stocks(d_str)
+        news_text = fetch_news_summary(max_articles=15)
+        
+        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
+        
+        jst = timezone(timedelta(hours=9))
+        return result, datetime.now(jst).strftime("%H:%M")
+        
+    return _run_analysis(date_str, db_version)
+
+def clear_shared_ai_insight():
+    """
+    共有AIインサイトのキャッシュをクリアする
+    """
+    import streamlit as st
+    # get_shared_ai_insight 内の _run_analysis のキャッシュクリア
+    st.cache_data.clear()

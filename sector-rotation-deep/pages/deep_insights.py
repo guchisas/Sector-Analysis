@@ -42,17 +42,11 @@ def render():
     st.markdown(section_header("AI深層分析レポート", "🧠"), unsafe_allow_html=True)
 
     # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
-    @st.cache_data(ttl=3600, show_spinner="🤖 Gemini AIが分析中...（30秒ほどかかる場合があります）")
-    def _cached_full_ai_insight(_date: str):
-        """日付をキーにして、日付が変わったらキャッシュを更新する"""
-        news_text = fetch_news_summary(max_articles=15)
-        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
-        # 日本時間（JST = UTC+9）で記録
-        from datetime import timezone, timedelta as td
-        jst = timezone(td(hours=9))
-        return result, datetime.now(jst).strftime("%H:%M")
-
-    insight, analyzed_at = _cached_full_ai_insight(latest_date)
+    from modules.ai_analyzer import get_shared_ai_insight, clear_shared_ai_insight
+    from modules.db_manager import get_db_last_modified
+    
+    db_version = get_db_last_modified()
+    insight, analyzed_at = get_shared_ai_insight(latest_date, db_version)
 
     # 次回更新可能時刻を計算
     try:
@@ -68,7 +62,7 @@ def render():
         st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新可能: {next_update} 以降")
     with col2:
         if st.button("🔄 AI再分析", use_container_width=True, type="primary"):
-            _cached_full_ai_insight.clear()
+            clear_shared_ai_insight()
             st.rerun()
 
     st.info(f"⚠️ この分析は全ユーザーで共有されています。「再分析」ボタンを押すとAPI制限を消費するため、{next_update} 以降に押してください。")
