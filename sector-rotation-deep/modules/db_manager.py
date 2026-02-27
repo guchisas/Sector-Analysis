@@ -152,7 +152,8 @@ def get_sector_summary(date: str = None) -> pd.DataFrame:
             AVG(rsi) as avg_rsi,
             AVG(volume_ratio) as avg_volume_ratio,
             SUM(close * volume) as trading_value,
-            AVG(percent_change) as avg_percent_change
+            AVG(percent_change) as avg_percent_change,
+            AVG(ppo) as avg_ppo
         FROM market_data
         WHERE date = ?
         GROUP BY sector

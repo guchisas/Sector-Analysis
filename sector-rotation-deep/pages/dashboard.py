@@ -101,12 +101,20 @@ def render():
     volume_surge = get_volume_surge_stocks()
     oversold = get_oversold_stocks()
 
-    # 現在のJST時刻と最終更新情報をヘッダー下に表示
+    # 最終更新情報をヘッダー下に表示
+    from modules.db_manager import get_db_last_modified
     from datetime import timezone, timedelta as td
+    
+    db_mtime = get_db_last_modified()
     jst = timezone(td(hours=9))
-    now_jst = datetime.now(jst)
-    next_hour = f"{(now_jst.hour + 1) % 24:02d}:{now_jst.minute:02d}"
-    st.caption(f"📅 データ: {latest_date} ｜ 🕐 現在 {now_jst.strftime('%H:%M')} (JST) ｜ 次回更新: {next_hour} 以降")
+    
+    if db_mtime > 0:
+        last_updated = datetime.fromtimestamp(db_mtime, jst)
+    else:
+        last_updated = datetime.now(jst)
+        
+    next_hour = f"{(last_updated.hour + 1) % 24:02d}:{last_updated.minute:02d}"
+    st.caption(f"📅 データ: {latest_date} ｜ 🕐 最終更新: {last_updated.strftime('%H:%M')} (JST) ｜ 次回更新: {next_hour} 以降")
 
     # ===== ステータスバー =====
     sector_count = latest_data["sector"].nunique() if not latest_data.empty else 0

@@ -70,9 +70,12 @@ def render():
 
     df = raw[selected_ticker]
 
-    # カラム名正規化
+    # MultiIndexカラムの場合は第1階層（Open, High, Low, Close, Volume）だけを取得する
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    elif df.columns.name == "Ticker":
+        # ['Open', 'High', 'Low', 'Close', 'Volume'] になっている場合
+        df = df.copy()
 
     # テクニカル指標計算
     df = calculate_all_indicators(df)
