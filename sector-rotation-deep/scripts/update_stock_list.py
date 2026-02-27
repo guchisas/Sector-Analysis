@@ -227,17 +227,18 @@ def main():
         return
 
     # 3. ティッカーシンボルを生成
+    # 実際のJPX Excelカラム名: 'コード', '銘柄名', '33業種区分'
     code_col = None
     name_col = None
     sector_col = None
 
     for col in filtered.columns:
-        col_str = str(col)
-        if "コード" in col_str or "銘柄コード" in col_str:
+        col_str = str(col).strip()
+        if col_str == "コード" and code_col is None:
             code_col = col
-        elif "銘柄名" in col_str:
+        elif col_str == "銘柄名" and name_col is None:
             name_col = col
-        elif "業種" in col_str or "33業種" in col_str:
+        elif col_str == "33業種区分" and sector_col is None:
             sector_col = col
 
     if code_col is None:

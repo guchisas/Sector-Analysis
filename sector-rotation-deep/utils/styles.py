@@ -143,7 +143,7 @@ def get_custom_css() -> str:
     }
     .section-header h3 {
         margin: 0;
-        color: #FAFAFA;
+        color: inherit;
         font-size: 1.1rem;
     }
 

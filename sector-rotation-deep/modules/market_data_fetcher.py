@@ -48,7 +48,19 @@ def fetch_batch(tickers: list[str], period: str = "6mo", interval: str = "1d") -
                 if not df.empty:
                     # マルチインデックスのカラムをフラット化
                     if isinstance(df.columns, pd.MultiIndex):
-                        df.columns = df.columns.get_level_values(0)
+                        target_level = 0
+                        for level in range(df.columns.nlevels):
+                            vals = [str(x).lower() for x in df.columns.get_level_values(level)]
+                            if "close" in vals or "open" in vals:
+                                target_level = level
+                                break
+                        df.columns = df.columns.get_level_values(target_level)
+                    
+                    # 小文字カラム名があれば大文字(Title Case)に統一
+                    rename_map = {c: str(c).capitalize() for c in df.columns if str(c).lower() in ["open", "high", "low", "close", "volume"]}
+                    if rename_map:
+                        df = df.rename(columns=rename_map)
+                        
                     result[ticker] = df
             else:
                 # 複数銘柄: カラムがマルチインデックス (ticker, field)
@@ -83,7 +95,19 @@ def fetch_batch(tickers: list[str], period: str = "6mo", interval: str = "1d") -
                             progress=False,
                         )
                         if isinstance(single_data.columns, pd.MultiIndex):
-                            single_data.columns = single_data.columns.get_level_values(0)
+                            target_level = 0
+                            for level in range(single_data.columns.nlevels):
+                                vals = [str(x).lower() for x in single_data.columns.get_level_values(level)]
+                                if "close" in vals or "open" in vals:
+                                    target_level = level
+                                    break
+                            single_data.columns = single_data.columns.get_level_values(target_level)
+                            
+                        # 小文字カラム名があれば大文字(Title Case)に統一
+                        rename_map = {c: str(c).capitalize() for c in single_data.columns if str(c).lower() in ["open", "high", "low", "close", "volume"]}
+                        if rename_map:
+                            single_data = single_data.rename(columns=rename_map)
+
                         if not single_data.empty:
                             result[ticker] = single_data
                     except Exception:
