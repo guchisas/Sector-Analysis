@@ -30,52 +30,56 @@ def render():
         ), unsafe_allow_html=True)
         return
 
-    # 銘柄選択
-    latest_data = get_latest_data()
-    if latest_data.empty:
-        st.warning("データがありません。")
+    # 銘柄選択 (フリーワード検索化)
+    col_input, col_period = st.columns([2, 1])
+    
+    with col_input:
+        raw_ticker = st.text_input(
+            "銘柄ティッカーを入力 (例: 7203, 9984.T)",
+            value="7203",
+            placeholder="証券コードを入力してください"
+        ).strip().upper()
+        
+    with col_period:
+        # 期間選択（デフォルト6mo、分析に必要な75SMA等を確保）
+        period = st.radio(
+            "表示期間",
+            ["3ヶ月", "6ヶ月", "1年"],
+            horizontal=True,
+            index=1,
+        )
+        period_map = {"3ヶ月": "3mo", "6ヶ月": "6mo", "1年": "1y"}
+
+    if not raw_ticker:
         return
+        
+    # 日本株で '.T' が抜けている場合、自動付与（数字のみ、またはアルファベットのみで.Tがない場合を想定。単純にドットが含まれていなければ付与）
+    selected_ticker = raw_ticker
+    if "." not in selected_ticker and selected_ticker.isalnum():
+        selected_ticker += ".T"
 
-    # ティッカーと銘柄名の辞書を作成
-    ticker_options = {}
-    for _, row in latest_data.iterrows():
-        label = f"{row['ticker']} - {row.get('name', '')} ({row.get('sector', '')})"
-        ticker_options[label] = row["ticker"]
+    with st.spinner(f"📊 {selected_ticker} のデータをオンデマンド取得中..."):
+        try:
+            import yfinance as yf
+            # API制限対策のため1銘柄のみオンデマンド取得
+            df = yf.download(selected_ticker, period=period_map[period], progress=False)
+        except Exception as e:
+            st.error(f"データの取得に失敗しました。ティッカーが正しいか確認してください。（エラー: {e}）")
+            return
 
-    selected_label = st.selectbox(
-        "銘柄を選択",
-        sorted(ticker_options.keys()),
-    )
-
-    if not selected_label:
+    if df.empty:
+        st.error(f"❌ {selected_ticker} のデータを取得できませんでした。上場廃止やティッカー間違いの可能性があります。")
         return
-
-    selected_ticker = ticker_options[selected_label]
-
-    # 期間選択
-    period = st.radio(
-        "表示期間",
-        ["1ヶ月", "3ヶ月", "6ヶ月"],
-        horizontal=True,
-        index=1,
-    )
-    period_map = {"1ヶ月": "1mo", "3ヶ月": "3mo", "6ヶ月": "6mo"}
-
-    with st.spinner(f"📊 {selected_ticker} のデータを取得中..."):
-        raw = fetch_batch([selected_ticker], period=period_map[period])
-
-    if selected_ticker not in raw or raw[selected_ticker].empty:
-        st.error(f"❌ {selected_ticker} のデータを取得できませんでした。")
-        return
-
-    df = raw[selected_ticker]
 
     # MultiIndexカラムの場合は第1階層（Open, High, Low, Close, Volume）だけを取得する
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    elif df.columns.name == "Ticker":
-        # ['Open', 'High', 'Low', 'Close', 'Volume'] になっている場合
-        df = df.copy()
+    elif "Close" not in df.columns and "close" in [c.lower() for c in df.columns]:
+        # yfinanceのバージョンによる違い吸収
+        df.rename(columns={c: c.capitalize() for c in df.columns}, inplace=True)
+    
+    # 欠損値があれば前日終値などで埋める
+    df = df.ffill().bfill()
 
     # テクニカル指標計算
     df = calculate_all_indicators(df)
@@ -186,3 +190,73 @@ def render():
         "scrollZoom": False,
         "displayModeBar": False,
     })
+    
+    # ===== AIアナリスト（参考ちゃん）分析パネル =====
+    st.markdown("<hr style='margin:40px 0; border:none; border-top:1px dashed #333;'>", unsafe_allow_html=True)
+    st.markdown("### 👩‍🏫 参考ちゃんのスイング分析アイ")
+    
+    # トレードロジックのFACT計算
+    try:
+        current_close = float(df["Close"].iloc[-1])
+        current_vol = float(df["Volume"].iloc[-1])
+        
+        # Phase 1: 落ちるナイフ
+        sma25_current = float(df["sma25"].iloc[-1]) if pd.notna(df["sma25"].iloc[-1]) else 0
+        sma75_current = float(df["sma75"].iloc[-1]) if pd.notna(df["sma75"].iloc[-1]) else 0
+        is_falling_knife = bool((current_close < sma25_current) and (sma25_current < sma75_current))
+        
+        # Phase 3: 簡易Pivot（ブレイクアウト）
+        recent_40d = df.tail(40)
+        pivot_40d_high = float(recent_40d["High"].max())
+        
+        recent_20d = df.tail(20)
+        avg_vol_20d = float(recent_20d["Volume"].mean())
+        
+        is_breakout = bool((current_close > pivot_40d_high) and (current_vol > avg_vol_20d))
+        
+        # Phase 4: リスク・リワード算出
+        stop_loss_20d_low = float(recent_20d["Low"].min())
+        
+        if current_close > pivot_40d_high:
+            # 既に直近高値超えの場合は、現在地から+10%を仮置き
+            target_price = current_close * 1.10
+        else:
+            target_price = pivot_40d_high
+            
+        risk = current_close - stop_loss_20d_low
+        reward = target_price - current_close
+        
+        if risk > 0:
+            rr_ratio = reward / risk
+        else:
+            rr_ratio = 99.9 # 分母ゼロ回避
+            
+        technical_facts = {
+            "current_close": current_close,
+            "sma25": sma25_current,
+            "sma75": sma75_current,
+            "is_falling_knife": is_falling_knife,
+            "pivot_40d": pivot_40d_high,
+            "is_breakout": is_breakout,
+            "20d_avg_volume": avg_vol_20d,
+            "current_volume": current_vol,
+            "stop_loss": stop_loss_20d_low,
+            "target": target_price,
+            "rr_ratio": rr_ratio
+        }
+        
+        from modules.ai_analyzer import analyze_swing_trade_with_gemini
+        
+        # 分析実行ボタン（API制限回避のオンデマンド）
+        if st.button("✨ 参考ちゃんに分析を依頼する", type="primary"):
+            with st.spinner("思考中...（事実に基づく戦略を構築しています）"):
+                ai_report = analyze_swing_trade_with_gemini(selected_ticker, technical_facts)
+                
+            st.markdown(f"""
+            <div style="background-color:rgba(30,40,50,0.8); border-top:4px solid #4C9BE8; padding:20px; border-radius:8px; margin-top:20px;">
+                {ai_report}
+            </div>
+            """, unsafe_allow_html=True)
+            
+    except Exception as e:
+        st.warning(f"分析に必要なデータが不足しているか、エラーが発生しました: {e}")

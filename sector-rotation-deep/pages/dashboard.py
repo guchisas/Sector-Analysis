@@ -324,10 +324,20 @@ def render():
         # バブルサイズ調整（最小1倍、外れ値はクリップ）
         chart_data['bubble_size'] = chart_data['avg_volume_ratio'].clip(lower=1.0, upper=5.0)
         
+        # トップ3とワースト3のラベルのみ表示する
+        top3_sectors = chart_data.head(3)['sector'].tolist()
+        worst3_sectors = chart_data.tail(3)['sector'].tolist()
+        display_sectors = top3_sectors + worst3_sectors
+        chart_data['display_label'] = chart_data['sector'].apply(lambda x: x if x in display_sectors else "")
+        
+        # 代表銘柄の統合
+        from utils.constants import REPRESENTATIVE_STOCKS
+        chart_data['representative_stocks'] = chart_data['sector'].map(REPRESENTATIVE_STOCKS).fillna('')
+        
         # カスタムホバーテキスト
         chart_data['hover_text'] = chart_data.apply(
             lambda r: (
-                f"<b>{r['sector']}</b><br>"
+                f"<b>{r['sector']}</b> ({r['representative_stocks']})<br>"
                 f"スコア: {int(r['momentum_score'])}<br>"
                 f"PPO: {r['avg_ppo']:+.2f}%<br>"
                 f"RSI: {r['avg_rsi']:.1f}<br>"
@@ -341,11 +351,12 @@ def render():
             y="avg_rsi",
             size="bubble_size",
             color="momentum_score",
-            text="sector",
+            text="display_label",
             color_continuous_scale="RdYlBu_r", # 赤系=高スコア、青系=低スコア
             hover_name="sector",
-            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "hover_text": True},
+            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "display_label": False, "hover_text": True},
             range_color=[0, 100],
+            opacity=0.85, # バブルの透明度を設定し重なりを見やすくする
         )
 
         # 常に中心（0, 50）が表示されるように軸範囲を調整
@@ -355,15 +366,15 @@ def render():
         fig_scatter.add_vline(x=0, line_dash="dash", line_color="rgba(255,255,255,0.4)")
         fig_scatter.add_hline(y=50, line_dash="dash", line_color="rgba(255,255,255,0.4)")
         
-        # 「押し目エリア」等の注釈
-        fig_scatter.add_annotation(x=max_abs_ppo*0.8, y=30, text="押し目エリア<br>(トレンド↑・過熱感↓)", showarrow=False, font=dict(color="#00D26A", size=10), opacity=0.7)
-        fig_scatter.add_annotation(x=max_abs_ppo*0.8, y=70, text="順張りエリア<br>(トレンド↑・過熱感↑)", showarrow=False, font=dict(color="#FF4B4B", size=10), opacity=0.7)
-        fig_scatter.add_annotation(x=-max_abs_ppo*0.8, y=70, text="戻り売りエリア<br>(トレンド↓・過熱感↑)", showarrow=False, font=dict(color="#FFB347", size=10), opacity=0.7)
-        fig_scatter.add_annotation(x=-max_abs_ppo*0.8, y=30, text="底値模索エリア<br>(トレンド↓・過熱感↓)", showarrow=False, font=dict(color="#4C9BE8", size=10), opacity=0.7)
+        # 「押し目エリア」等の注釈 (四隅に移動して透かし風に)
+        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=15, text="押し目エリア<br>(トレンド↑・過熱感↓)", showarrow=False, font=dict(color="#00D26A", size=12), opacity=0.35, align="right", xanchor="right", yanchor="bottom")
+        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=85, text="順張りエリア<br>(トレンド↑・過熱感↑)", showarrow=False, font=dict(color="#FF4B4B", size=12), opacity=0.35, align="right", xanchor="right", yanchor="top")
+        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=85, text="戻り売りエリア<br>(トレンド↓・過熱感↑)", showarrow=False, font=dict(color="#FFB347", size=12), opacity=0.35, align="left", xanchor="left", yanchor="top")
+        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=15, text="底値模索エリア<br>(トレンド↓・過熱感↓)", showarrow=False, font=dict(color="#4C9BE8", size=12), opacity=0.35, align="left", xanchor="left", yanchor="bottom")
 
         fig_scatter.update_traces(
             textposition='top center',
-            textfont_size=10,
+            textfont=dict(size=11, color="white", weight="bold"),
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
@@ -379,6 +390,7 @@ def render():
             yaxis=dict(range=[10, 90], zeroline=False, gridcolor="rgba(255,255,255,0.1)"),
             coloraxis_colorbar=dict(title="スコア", thicknessmode="pixels", thickness=15, lenmode="pixels", len=200),
             margin=dict(l=20, r=20, t=30, b=20),
+            hovermode="closest", # スマホでのツールチップ表示UXを考慮
         )
         st.plotly_chart(fig_scatter, use_container_width=True, config={"displayModeBar": False})
 
@@ -455,12 +467,13 @@ def render():
         # --------------------------------------------------
         st.markdown("<h4 style='margin-top:20px;'>📋 全33業種 詳細データテーブル</h4>", unsafe_allow_html=True)
         
-        display_df = chart_data[["sector", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]].copy()
+        # 表示用のデータフレーム
+        display_df = chart_data[["sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]].copy()
         
         if "up_down_ratio" in display_df.columns:
             display_df["up_down_ratio"] = display_df["up_down_ratio"] * 100
             
-        display_df.columns = ["セクター", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "騰落レシオ (%)"]
+        display_df.columns = ["セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "騰落レシオ (%)"]
         
         # モメンタムスコアで降順
         display_df = display_df.sort_values("モメンタムスコア", ascending=False)
@@ -476,10 +489,38 @@ def render():
             subset=["モメンタムスコア"], cmap="RdYlGn_r", vmin=0, vmax=100
         )
         
+        # ツールチップ付きカラム設定
         st.dataframe(
             styled_df,
             hide_index=True,
             use_container_width=True,
+            column_config={
+                "セクター": st.column_config.TextColumn("セクター"),
+                "代表銘柄": st.column_config.TextColumn(
+                    "代表銘柄", 
+                    help="セクターを代表する主な上場企業"
+                ),
+                "モメンタムスコア": st.column_config.NumberColumn(
+                    "モメンタムスコア", 
+                    help="4つの指標を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強い。"
+                ),
+                "騰落率 (%)": st.column_config.NumberColumn(
+                    "騰落率 (%)",
+                    help="セクター構成銘柄の前日比の平均。"
+                ),
+                "出来高倍率 (x)": st.column_config.NumberColumn(
+                    "出来高倍率 (x)",
+                    help="本日の予測出来高が過去5日平均の何倍か。1.5x以上は機関の介入の可能性大。"
+                ),
+                "25MA乖離率 (%)": st.column_config.NumberColumn(
+                    "25MA乖離率 (%)",
+                    help="25日移動平均線からの乖離度合い。トレンドの強さと過熱感を示す。"
+                ),
+                "騰落レシオ (%)": st.column_config.NumberColumn(
+                    "騰落レシオ (%)",
+                    help="セクター内で今日値上がりしている銘柄の割合。セクター全体の同調率。"
+                )
+            },
             height=500
         )
 

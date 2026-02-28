@@ -267,3 +267,80 @@ def clear_shared_ai_insight():
     import streamlit as st
     # get_shared_ai_insight 内の _run_analysis のキャッシュクリア
     st.cache_data.clear()
+
+def _build_swing_prompt(ticker: str, facts: dict) -> str:
+    """参考ちゃん（スイングアナリスト）への制約付きプロンプトを構築する"""
+    is_falling_knife = facts.get("is_falling_knife", False)
+    is_breakout = facts.get("is_breakout", False)
+    rr_ratio = facts.get("rr_ratio", 0.0)
+    
+    fact_text = f"""
+【対象銘柄】{ticker}
+【現在値】{facts.get('current_close', 0):,.1f} 円
+【25SMA】{facts.get('sma25', 0):,.1f} 円
+【75SMA】{facts.get('sma75', 0):,.1f} 円
+【直近40日最高値 (Pivot)】{facts.get('pivot_40d', 0):,.1f} 円
+【20日平均出来高】{facts.get('20d_avg_volume', 0):,.0f} 株
+【直近出来高】{facts.get('current_volume', 0):,.0f} 株
+
+--- 判定フラグ ---
+・落ちるナイフ状態（現在値<25SMA<75SMA）: {is_falling_knife}
+・ブレイクアウト状態（現在値>Pivot かつ 出来高急増）: {is_breakout}
+
+--- リスク・リワード計算 ---
+・想定Stop Loss（直近20日最安値）: {facts.get('stop_loss', 0):,.1f} 円
+・暫定Target: {facts.get('target', 0):,.1f} 円
+・R:R 比率: {rr_ratio:.2f}
+"""
+
+    prompt = f"""
+あなたはローリスク・ハイリターンを狙う冷徹かつ優秀なスイングトレーダー「参考ちゃん」です。
+以下のPythonが計算したテクニカルデータ（事実）のみに基づいて、現在の局面とアクションプランをMarkdownの箇条書き等の読みやすい形式で回答してください。
+
+{fact_text}
+
+【厳守すべきルール】
+ルール1: 「落ちるナイフ状態」がTrueであれば、どんな理由があろうと絶対に『見送り』を推奨すること。
+ルール2: 「R:R（リスクリワード）比率」が3.0未満の場合は、旨味が少ない勝負として明確に警告すること。
+ルール3: 断定的な予測は避け、ストップロスと利確目標を明記した戦略を具体的に提示すること。
+
+【出力フォーマット】必ず以下の3つのセクションに分けて出力してください。
+### ⚔️ 総合判定
+【見送り】【監視継続（押し目待ち）】【打診買い】【ブレイクアウト（Go）】などの端的な結論を最初に述べる。
+
+### 📊 テクニカル＆R:R評価
+Pythonで計算したSMAの状態やR:R比率を解説しつつ、現状のチャートの形を評価する。
+
+### 🎯 アクションプラン
+具体的なStop Lossライン（撤退線）とTarget（目標値）を明記した、次に取るべき行動の提案。
+"""
+    return prompt
+
+def analyze_swing_trade_with_gemini(ticker: str, technical_facts: dict) -> str:
+    """
+    個別銘柄のスイングトレード診断をGeminiで実行する
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return "⚠️ エラー: Gemini APIキーが設定されていません。"
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        
+        # 通常の分析と同様のモデル選択ロジック（簡略化して1.5-pro系を狙う）
+        model = genai.GenerativeModel("gemini-1.5-pro-latest")
+        
+        prompt = _build_swing_prompt(ticker, technical_facts)
+        response = model.generate_content(prompt)
+        
+        return response.text
+        
+    except Exception as e:
+        # モデル名エラーのフォールバック
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as fallback_e:
+            return f"⚠️ 診断中にエラーが発生しました。\n\n詳細: {str(e)} / {str(fallback_e)}"
