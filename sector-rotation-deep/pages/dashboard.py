@@ -19,14 +19,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.db_manager import (
     db_exists, get_latest_date, get_latest_data,
-    get_sector_summary, get_volume_surge_stocks,
-    get_oversold_stocks, upsert_market_data, init_db
+    get_sector_summary, get_advanced_sector_summary, get_sector_history_stats,
+    get_volume_surge_stocks, get_oversold_stocks, upsert_market_data, init_db
 )
 from modules.market_data_fetcher import fetch_with_streamlit_progress
 from modules.technical_analysis import calculate_all_indicators, get_latest_indicators
 from modules.jpx_stock_list import get_all_stocks, get_all_tickers, get_ticker_to_sector, get_ticker_to_name
 from modules.ai_analyzer import analyze_with_gemini
 from modules.news_fetcher import fetch_news_summary
+from modules.momentum_calculator import calculate_sector_momentum_scores
 from modules.market_overview import fetch_market_overview, render_market_panel_html
 from utils.styles import metric_card, stock_card, section_header, empty_state
 
@@ -97,7 +98,13 @@ def render():
     # 最新データ取得
     latest_date = get_latest_date()
     latest_data = get_latest_data()
-    sector_summary = get_sector_summary()
+    # 新しいモメンタム用の詳細サマリーと履歴を取得
+    sector_summary = get_advanced_sector_summary(latest_date)
+    sector_history = get_sector_history_stats(latest_date, days=20)
+    
+    # モメンタムスコアの計算
+    if not sector_summary.empty:
+        sector_summary = calculate_sector_momentum_scores(sector_summary, sector_history)
     volume_surge = get_volume_surge_stocks()
     oversold = get_oversold_stocks()
 
@@ -285,114 +292,195 @@ def render():
     st.markdown(_insight_html, unsafe_allow_html=True)
     st.caption(f"🕐 {analyzed_at} 時点の分析です ｜ 次回更新: {next_update} 以降 ｜ 詳細は「AIインサイト」ページへ")
 
-    # ===== セクター別 騰落率ランキング =====
-    st.markdown(section_header("セクター別 騰落率ランキング - 資金の流入・流出", "🏆"), unsafe_allow_html=True)
+    # ===== セクター別 資金流入・流出ランキング (モメンタムスコア) =====
+    st.markdown(section_header("セクター別 資金流入・流出ランキング", "🏆"), unsafe_allow_html=True)
 
-    if not sector_summary.empty:
-        # データの整形
+    if not sector_summary.empty and "momentum_score" in sector_summary.columns:
+        # 詳細テキストの作成
         chart_data = sector_summary.copy()
-        chart_data["percent_change_fmt"] = chart_data["avg_percent_change"].apply(lambda x: f"{x:+.2f}%")
-        chart_data["volume_ratio_fmt"] = chart_data["avg_volume_ratio"].apply(lambda x: f"{x:.2f}x")
         
-        # 騰落率で降順にソート
-        chart_data = chart_data.sort_values("avg_percent_change", ascending=False)
+        # フォーマット適用
+        chart_data["percent_change_fmt"] = chart_data["avg_percent_change"].apply(lambda x: f"{x:+.2f}%")
+        chart_data["volume_ratio_fmt"] = chart_data["avg_volume_ratio"].apply(lambda x: f"{x:.1f}x")
+        if "up_down_ratio" in chart_data.columns:
+            chart_data["up_ratio_fmt"] = chart_data["up_down_ratio"].apply(lambda x: f"{x*100:.0f}%")
+        else:
+            chart_data["up_ratio_fmt"] = "-"
+            
+        chart_data["detail_text"] = chart_data.apply(
+            lambda r: f"スコア:{int(r['momentum_score'])} (騰落:{r['percent_change_fmt']} | 出来高:{r['volume_ratio_fmt']} | 上昇:{r['up_ratio_fmt']})", 
+            axis=1
+        )
+        
+        # スコアで降順にソート
+        chart_data = chart_data.sort_values("momentum_score", ascending=False)
+        
+        # --------------------------------------------------
+        # セクターローテーション・レーダー（散布図）
+        # --------------------------------------------------
+        st.markdown("<h4 style='margin-bottom:10px;'>🗺️ セクターローテーション・レーダー</h4>", unsafe_allow_html=True)
+        
+        # Plotly Expressで散布図を作成
+        # バブルサイズ調整（最小1倍、外れ値はクリップ）
+        chart_data['bubble_size'] = chart_data['avg_volume_ratio'].clip(lower=1.0, upper=5.0)
+        
+        # カスタムホバーテキスト
+        chart_data['hover_text'] = chart_data.apply(
+            lambda r: (
+                f"<b>{r['sector']}</b><br>"
+                f"スコア: {int(r['momentum_score'])}<br>"
+                f"PPO: {r['avg_ppo']:+.2f}%<br>"
+                f"RSI: {r['avg_rsi']:.1f}<br>"
+                f"RVOL: {r['avg_volume_ratio']:.2f}x"
+            ), axis=1
+        )
+
+        fig_scatter = px.scatter(
+            chart_data,
+            x="avg_ppo",
+            y="avg_rsi",
+            size="bubble_size",
+            color="momentum_score",
+            text="sector",
+            color_continuous_scale="RdYlBu_r", # 赤系=高スコア、青系=低スコア
+            hover_name="sector",
+            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "hover_text": True},
+            range_color=[0, 100],
+        )
+
+        # 常に中心（0, 50）が表示されるように軸範囲を調整
+        max_abs_ppo = max(abs(chart_data["avg_ppo"].min()), abs(chart_data["avg_ppo"].max()), 1.0)
+        
+        # 基準線と帯域の追加（X=0, Y=50）
+        fig_scatter.add_vline(x=0, line_dash="dash", line_color="rgba(255,255,255,0.4)")
+        fig_scatter.add_hline(y=50, line_dash="dash", line_color="rgba(255,255,255,0.4)")
+        
+        # 「押し目エリア」等の注釈
+        fig_scatter.add_annotation(x=max_abs_ppo*0.8, y=30, text="押し目エリア<br>(トレンド↑・過熱感↓)", showarrow=False, font=dict(color="#00D26A", size=10), opacity=0.7)
+        fig_scatter.add_annotation(x=max_abs_ppo*0.8, y=70, text="順張りエリア<br>(トレンド↑・過熱感↑)", showarrow=False, font=dict(color="#FF4B4B", size=10), opacity=0.7)
+        fig_scatter.add_annotation(x=-max_abs_ppo*0.8, y=70, text="戻り売りエリア<br>(トレンド↓・過熱感↑)", showarrow=False, font=dict(color="#FFB347", size=10), opacity=0.7)
+        fig_scatter.add_annotation(x=-max_abs_ppo*0.8, y=30, text="底値模索エリア<br>(トレンド↓・過熱感↓)", showarrow=False, font=dict(color="#4C9BE8", size=10), opacity=0.7)
+
+        fig_scatter.update_traces(
+            textposition='top center',
+            textfont_size=10,
+            hovertemplate="%{customdata[0]}<extra></extra>",
+            customdata=chart_data[['hover_text']]
+        )
+        
+        fig_scatter.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            height=450,
+            xaxis_title="トレンドの強さ (PPO %)",
+            yaxis_title="短期の加熱感 (RSI)",
+            xaxis=dict(range=[-max_abs_ppo*1.1, max_abs_ppo*1.1], zeroline=False, gridcolor="rgba(255,255,255,0.1)"),
+            yaxis=dict(range=[10, 90], zeroline=False, gridcolor="rgba(255,255,255,0.1)"),
+            coloraxis_colorbar=dict(title="スコア", thicknessmode="pixels", thickness=15, lenmode="pixels", len=200),
+            margin=dict(l=20, r=20, t=30, b=20),
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True, config={"displayModeBar": False})
+
+        st.markdown("<hr style='margin:30px 0; border:none; border-top:1px dashed #333;'>", unsafe_allow_html=True)
         
         # --------------------------------------------------
         # Top 5 / Worst 5 チャート (Altair)
         # --------------------------------------------------
         winners = chart_data.head(5).copy()
-        
-        # Worst 5 は昇順（ワースト1位が一番上に来るようにする）
         losers = chart_data.tail(5).copy()
-        losers = losers.sort_values("avg_percent_change", ascending=True)
+        losers = losers.sort_values("momentum_score", ascending=True)
 
         import altair as alt
 
         col_win, col_lose = st.columns(2)
 
         with col_win:
-            st.markdown("<h4 style='color:#FF4B4B; margin-bottom:10px;'>🔥 上昇トップ5 (Winners)</h4>", unsafe_allow_html=True)
-            if not winners.empty and winners["avg_percent_change"].max() > 0:
+            st.markdown("<h4 style='color:#FF4B4B; margin-bottom:10px;'>🔥 資金流入トップ5 (Strong Inflow)</h4>", unsafe_allow_html=True)
+            if not winners.empty:
                 domain_w = winners["sector"].tolist()
                 base_w = alt.Chart(winners).encode(
                     y=alt.Y("sector:N", sort=domain_w, axis=alt.Axis(title=None, labels=False, ticks=False, domain=False))
                 )
-                # バー (右方向、エンジ/赤系)
-                bars_w = base_w.mark_bar(color="#FF4B4B", cornerRadiusEnd=4, size=24).encode(
-                    x=alt.X("avg_percent_change:Q", axis=alt.Axis(title=None, labels=False, ticks=False, grid=False, domain=False))
+                
+                # スコアを0-100のバーにする
+                bars_w = base_w.mark_bar(color="#FF4B4B", cornerRadiusEnd=4, size=24, opacity=0.85).encode(
+                    x=alt.X("momentum_score:Q", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title=None, labels=False, ticks=False, grid=False, domain=False))
                 )
                 
-                # 騰落率テキスト (バーの右端の外側)
-                text_w = base_w.mark_text(align="left", dx=4, color="white", fontWeight="bold").encode(
-                    x=alt.X("avg_percent_change:Q"),
-                    text="percent_change_fmt:N"
+                # 詳細テキストをバーの右端の外側に配置
+                text_w = base_w.mark_text(align="left", dx=4, color="white", font="Inter, sans-serif", fontSize=11).encode(
+                    x=alt.X("momentum_score:Q"),
+                    text="detail_text:N"
                 )
                 
-                # セクター名テキスト (バーの根元=内側左端)
-                label_w = base_w.mark_text(align="left", dx=4, color="white").encode(
+                # セクター名テキストをバーの左端(根元)に配置
+                label_w = base_w.mark_text(align="left", dx=4, color="white", fontWeight="bold", font="Inter, sans-serif").encode(
                     x=alt.datum(0),
                     text="sector:N"
                 )
                 
                 fig_w = alt.layer(bars_w, text_w, label_w).configure_view(strokeWidth=0).properties(height=200)
                 st.altair_chart(fig_w, use_container_width=True)
-            else:
-                st.info("目立った上昇セクターはありません。")
                 
         with col_lose:
-            st.markdown("<h4 style='color:#00D26A; margin-bottom:10px;'>🧊 下落ワースト5 (Losers)</h4>", unsafe_allow_html=True)
-            if not losers.empty and losers["avg_percent_change"].min() < 0:
+            st.markdown("<h4 style='color:#00D26A; margin-bottom:10px;'>🧊 資金流出ワースト5 (Strong Outflow)</h4>", unsafe_allow_html=True)
+            if not losers.empty:
                 domain_l = losers["sector"].tolist()
                 base_l = alt.Chart(losers).encode(
                     y=alt.Y("sector:N", sort=domain_l, axis=alt.Axis(title=None, labels=False, ticks=False, domain=False))
                 )
-                # バー (左方向、青緑/Green系)
-                bars_l = base_l.mark_bar(color="#00D26A", cornerRadiusEnd=4, size=24).encode(
-                    x=alt.X("avg_percent_change:Q", axis=alt.Axis(title=None, labels=False, ticks=False, grid=False, domain=False))
+                
+                # outflow側は視覚的に反対に伸ばすため元の値を反転させてプロットするアプローチもあるが、
+                # 仕様通り「0に近い順」にしてそのままプロットする。バーは短くなる。
+                bars_l = base_l.mark_bar(color="#00D26A", cornerRadiusEnd=4, size=24, opacity=0.85).encode(
+                    x=alt.X("momentum_score:Q", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title=None, labels=False, ticks=False, grid=False, domain=False))
                 )
                 
-                # 騰落率テキスト (バーの左端の外側)
-                text_l = base_l.mark_text(align="right", dx=-4, color="white", fontWeight="bold").encode(
-                    x=alt.X("avg_percent_change:Q"),
-                    text="percent_change_fmt:N"
+                text_l = base_l.mark_text(align="left", dx=4, color="white", font="Inter, sans-serif", fontSize=11).encode(
+                    x=alt.X("momentum_score:Q"),
+                    text="detail_text:N"
                 )
                 
-                # セクター名テキスト (バーの根元=内側右端)
-                label_l = base_l.mark_text(align="right", dx=-4, color="white").encode(
+                label_l = base_l.mark_text(align="left", dx=4, color="white", fontWeight="bold", font="Inter, sans-serif").encode(
                     x=alt.datum(0),
                     text="sector:N"
                 )
                 
                 fig_l = alt.layer(bars_l, text_l, label_l).configure_view(strokeWidth=0).properties(height=200)
                 st.altair_chart(fig_l, use_container_width=True)
-            else:
-                st.info("目立った下落セクターはありません。")
                 
         # --------------------------------------------------
-        # 全33業種一覧リスト (DataFrame + Style Bar)
+        # 全33業種 詳細データテーブル
         # --------------------------------------------------
-        st.markdown("<h4 style='margin-top:20px;'>📋 全33業種 騰落率一覧</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='margin-top:20px;'>📋 全33業種 詳細データテーブル</h4>", unsafe_allow_html=True)
         
-        display_df = chart_data[["sector", "avg_percent_change", "avg_volume_ratio", "stock_count"]].copy()
-        display_df.columns = ["セクター", "前日比 (%)", "出来高倍率 (x)", "銘柄数"]
+        display_df = chart_data[["sector", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]].copy()
         
-        # df.style.bar() 機能を利用して表の中に騰落率の横棒グラフを描画する
+        if "up_down_ratio" in display_df.columns:
+            display_df["up_down_ratio"] = display_df["up_down_ratio"] * 100
+            
+        display_df.columns = ["セクター", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "騰落レシオ (%)"]
+        
+        # モメンタムスコアで降順
+        display_df = display_df.sort_values("モメンタムスコア", ascending=False)
+        
+        # フォーマット
         styled_df = display_df.style.format({
-            "前日比 (%)": "{:+.2f}%",
+            "モメンタムスコア": "{:.0f}",
+            "騰落率 (%)": "{:+.2f}%",
             "出来高倍率 (x)": "{:.2f}x",
-            "銘柄数": "{:d}"
-        }).bar(
-            subset=["前日比 (%)"],
-            align="mid",  # 0を中央にする
-            # マイナスは緑系、プラスは赤系の色で塗り分ける
-            color=["rgba(0, 210, 106, 0.4)", "rgba(255, 75, 75, 0.4)"]
+            "25MA乖離率 (%)": "{:+.2f}%",
+            "騰落レシオ (%)": "{:.1f}%"
+        }).background_gradient(
+            subset=["モメンタムスコア"], cmap="RdYlGn_r", vmin=0, vmax=100
         )
         
         st.dataframe(
             styled_df,
             hide_index=True,
             use_container_width=True,
-            height=450  # スクロール対応の高さ確保
+            height=500
         )
 
     # ===== 出来高急増 TOP20 =====

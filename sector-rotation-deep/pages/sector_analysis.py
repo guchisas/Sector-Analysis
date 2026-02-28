@@ -20,6 +20,8 @@ from modules.db_manager import (
 )
 from utils.styles import section_header, stock_card, empty_state, metric_card
 from utils.constants import SECTORS
+import yfinance as yf
+import time
 
 
 def render():
@@ -150,6 +152,81 @@ def render():
                 avg_ppo = sector_stocks["ppo"].mean()
                 ppo_sign = "+" if avg_ppo >= 0 else ""
                 st.markdown(metric_card("平均PPO", f"{ppo_sign}{avg_ppo:.2f}%", "📉"), unsafe_allow_html=True)
+
+            # ===== お宝出遅れ銘柄発掘 =====
+            st.markdown("<h4 style='margin-top:20px; color:#FFB347;'>💎 【お宝発掘】ファンダ良好・出遅れ銘柄</h4>", unsafe_allow_html=True)
+            
+            # セクター平均騰落率
+            sector_avg_pct = sector_summary[sector_summary["sector"] == selected_sector]["avg_percent_change"].values[0] if not sector_summary[sector_summary["sector"] == selected_sector].empty else 0.0
+            
+            # API呼び出しの負荷軽減のため、ボタン押下時のみ取得するか、キャッシュを利用する
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def _get_fundamentals(tickers):
+                results = {}
+                for t in tickers:
+                    try:
+                        info = yf.Ticker(t).info
+                        per = info.get("trailingPE")
+                        pbr = info.get("priceToBook")
+                        results[t] = {"per": per, "pbr": pbr}
+                        time.sleep(0.5) # レート制限回避
+                    except BaseException:
+                        results[t] = {"per": None, "pbr": None}
+                return results
+
+            if st.button("🔍 出遅れ銘柄を検索（ファンダメンタルズ取得）", key=f"btn_search_{selected_sector}"):
+                with st.spinner(f"'{selected_sector}' セクター {len(sector_stocks)} 銘柄の情報を取得中..."):
+                    fund_data = _get_fundamentals(sector_stocks["ticker"].tolist())
+                    
+                    # 出遅れ判定
+                    laggards = []
+                    for _, row in sector_stocks.iterrows():
+                        ticker = row["ticker"]
+                        pct = row.get("percent_change", 0.0)
+                        rsi = row.get("rsi", 50.0)
+                        
+                        f_data = fund_data.get(ticker, {})
+                        per = f_data.get("per")
+                        pbr = f_data.get("pbr")
+                        
+                        # 条件: 
+                        # 1. PBRが1.0未満、または PERが15.0未満
+                        # 2. 本日の騰落率がセクター平均より低い または RSIが50以下
+                        is_undervalued = (pbr is not None and pbr < 1.0) or (per is not None and per < 15.0)
+                        is_laggard = (pct < sector_avg_pct) or (rsi < 50.0)
+                        
+                        if is_undervalued and is_laggard:
+                            laggards.append({
+                                "ticker": ticker,
+                                "name": row.get("name", ""),
+                                "pct": pct,
+                                "pbr": pbr,
+                                "per": per
+                            })
+                    
+                    if laggards:
+                        for item in sorted(laggards, key=lambda x: (x["pbr"] or 999)):
+                            pbr_str = f"{item['pbr']:.2f}倍" if item['pbr'] is not None else "N/A"
+                            per_str = f"{item['per']:.1f}倍" if item['per'] is not None else "N/A"
+                            
+                            st.markdown(f"""
+                            <div style="background-color:rgba(255,179,71,0.1); border-left:4px solid #FFB347; padding:10px 15px; margin-bottom:10px; border-radius:4px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div>
+                                        <div style="font-size:0.9rem; color:#888;">{item['ticker']}</div>
+                                        <div style="font-size:1.1rem; font-weight:bold;">{item['name']}</div>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <div style="font-size:1.0rem; color:{'#FF4B4B' if item['pct']>0 else '#00D26A'};">騰落率: {item['pct']:+.2f}%</div>
+                                        <div style="font-size:0.85rem; color:#ccc;">PBR: {pbr_str} | PER: {per_str}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        st.info("条件に合致するお宝出遅れ銘柄は見つかりませんでした。")
+            
+            st.markdown("<hr style='margin:30px 0; border:none; border-top:1px dashed #333;'>", unsafe_allow_html=True)
 
             # 銘柄カード表示
             sort_option = st.radio(

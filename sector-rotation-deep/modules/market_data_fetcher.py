@@ -18,7 +18,7 @@ MAX_RETRIES = 3       # 最大リトライ回数
 RETRY_DELAY = 2       # リトライ間隔（秒、指数バックオフの基準）
 
 
-def fetch_batch(tickers: list[str], period: str = "6mo", interval: str = "1d") -> dict[str, pd.DataFrame]:
+def fetch_batch(tickers: list[str], period: str = "1mo", interval: str = "1d") -> dict[str, pd.DataFrame]:
     """
     銘柄リストのデータを一括取得する
     失敗時は最大3回リトライ（指数バックオフ）
@@ -118,7 +118,7 @@ def fetch_batch(tickers: list[str], period: str = "6mo", interval: str = "1d") -
 
 def fetch_all_stocks(
     tickers: list[str],
-    period: str = "6mo",
+    period: str = "1mo", # 20日間の履歴を取得するため1moに変更
     progress_callback=None,
 ) -> dict[str, pd.DataFrame]:
     """
@@ -160,7 +160,7 @@ def fetch_all_stocks(
 
 def fetch_with_streamlit_progress(
     tickers: list[str],
-    period: str = "6mo",
+    period: str = "1mo", # 20日間の履歴を取得するため1moに変更
 ) -> dict[str, pd.DataFrame]:
     """
     Streamlit UIに進捗バーを表示しながらデータを取得する

@@ -163,6 +163,69 @@ def get_sector_summary(date: str = None) -> pd.DataFrame:
     return df
 
 
+def get_sector_history_stats(date: str = None, days: int = 20) -> pd.DataFrame:
+    """
+    指定した日付から過去N日間の各セクターの平均騰落率（前日比）等を取得する。
+    Zスコア計算時の標準偏差・平均の算出に使用する。
+    """
+    if date is None:
+        date = get_latest_date()
+    if not date:
+        return pd.DataFrame()
+
+    conn = get_connection()
+    df = pd.read_sql_query(f"""
+        SELECT date, sector, AVG(percent_change) as avg_percent_change
+        FROM market_data
+        WHERE date <= ? AND date >= date(?, '-{days * 2} days') -- 休場日を考慮し多めに取得
+        GROUP BY date, sector
+        ORDER BY date DESC
+    """, conn, params=(date, date))
+    conn.close()
+    
+    # 最新の20営業日を抽出する
+    if not df.empty:
+        dates = df['date'].unique()
+        target_dates = dates[:days]
+        df = df[df['date'].isin(target_dates)]
+        
+    return df
+
+
+def get_advanced_sector_summary(date: str = None) -> pd.DataFrame:
+    """
+    セクター別サマリーを取得する。
+    従来の指標に加え、騰落レシオ（前日比プラスの銘柄割合）などの高度な指標も算出する。
+    """
+    if date is None:
+        date = get_latest_date()
+    if not date:
+        return pd.DataFrame()
+
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        SELECT
+            sector,
+            COUNT(*) as stock_count,
+            SUM(CASE WHEN percent_change > 0 THEN 1 ELSE 0 END) as up_count,
+            AVG(rsi) as avg_rsi,
+            AVG(volume_ratio) as avg_volume_ratio,
+            SUM(close * volume) as trading_value,
+            AVG(percent_change) as avg_percent_change,
+            AVG(ppo) as avg_ppo
+        FROM market_data
+        WHERE date = ?
+        GROUP BY sector
+    """, conn, params=(date,))
+    conn.close()
+    
+    if not df.empty:
+        # 騰落レシオ (0.0 - 1.0)
+        df['up_down_ratio'] = df['up_count'] / df['stock_count']
+        
+    return df
+
+
 def get_oversold_stocks(date: str = None, rsi_threshold: float = 30.0) -> pd.DataFrame:
     """RSIが閾値以下の売られすぎ銘柄を取得する"""
     if date is None:
