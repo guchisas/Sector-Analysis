@@ -467,6 +467,14 @@ def render():
         # --------------------------------------------------
         st.markdown("<h4 style='margin-top:20px;'>📋 全33業種 詳細データテーブル</h4>", unsafe_allow_html=True)
         
+        with st.expander("💡 テーブルの各項目の見方"):
+            st.markdown("""
+            * **騰落率 (%):** 前日比の価格変化。セクター全体の現在の勢いを示します。
+            * **出来高倍率 (x):** 過去5日平均に対する本日の出来高ペース（時間補正済）。1.5x以上なら大口の資金流入（本気度が高い）と判断できます。
+            * **25MA乖離率 (%):** 25日移動平均線からの離れ具合。高すぎると高値掴みのリスク（加熱）、マイナスなら下落トレンドを意味します。
+            * **騰落レシオ (%):** セクター内で今日値上がりしている銘柄の割合。80%以上ならセクター全体への本物の資金流入（同調買い）を示します。
+            """)
+        
         # 表示用のデータフレーム
         display_df = chart_data[["sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]].copy()
         

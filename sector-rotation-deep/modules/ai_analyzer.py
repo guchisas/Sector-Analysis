@@ -130,19 +130,17 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         import google.generativeai as genai
 
         genai.configure(api_key=api_key)
-        # ホワイトリスト方式：1.5系と1.0系のみ許可（2.0, 2.5, 3.0等の新版は無料枠が不安定なため除外）
+        # 安定稼働する最新・安定版モデルのみ許可
         available_models = [
             m.name for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
-            and ("1.5" in m.name or "1.0" in m.name or m.name == "models/gemini-pro")
         ]
         
-        # 優先順位リスト（安定動作が確認されているモデルのみ）
+        # 優先順位リスト（最新・安定動作が確認されているモデル名へ更新）
         preferred_models = [
             "models/gemini-1.5-pro",          # 最も賢いモデル（推奨）
-            "models/gemini-1.5-pro-latest",
-            "models/gemini-1.5-flash",        # 高速版
-            "models/gemini-1.5-flash-latest",
+            "models/gemini-2.5-flash",        # 最新の高速版
+            "models/gemini-1.5-flash",        # フォールバックの高速版
             "models/gemini-pro"               # 完全なフォールバック
         ]
         
@@ -328,8 +326,8 @@ def analyze_swing_trade_with_gemini(ticker: str, technical_facts: dict) -> str:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         
-        # 通常の分析と同様のモデル選択ロジック（簡略化して1.5-pro系を狙う）
-        model = genai.GenerativeModel("gemini-1.5-pro-latest")
+        # 通常の分析と同様のモデル選択ロジック
+        model = genai.GenerativeModel("gemini-1.5-pro")
         
         prompt = _build_swing_prompt(ticker, technical_facts)
         response = model.generate_content(prompt)
