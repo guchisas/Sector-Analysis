@@ -347,13 +347,18 @@ def render():
         chart_data['bubble_size'] = chart_data['avg_volume_ratio'].clip(lower=1.0, upper=5.0)
         
         # === スポットライト効果の追加 ===
-        # トップ5とワースト5を取得
+        # ラベルが重なって見えなくなるのを防ぐため、文字ラベルを出すのはTop3とWorst3に限定
+        top_text_sectors = chart_data.nlargest(3, 'momentum_score')['sector'].tolist()
+        worst_text_sectors = chart_data.nsmallest(3, 'momentum_score')['sector'].tolist()
+        text_sectors = top_text_sectors + worst_text_sectors
+        
+        # ハイライト（色と枠線で目立たせる）対象は変更前と同じくTop5とWorst5
         top5_sectors = chart_data.nlargest(5, 'momentum_score')['sector'].tolist()
         worst5_sectors = chart_data.nsmallest(5, 'momentum_score')['sector'].tolist()
         highlight_sectors = top5_sectors + worst5_sectors
         
-        # 1. ラベル用列の作成（強調対象のみテキストを設定）
-        chart_data['display_label'] = chart_data['sector'].apply(lambda x: x if x in highlight_sectors else "")
+        # 1. ラベル用列の作成（Top3/Worst3のみテキストを設定）
+        chart_data['display_label'] = chart_data['sector'].apply(lambda x: x if x in text_sectors else "")
         
         # 2. 強調用のフラグとスタイル設定列を作成
         chart_data['is_highlight'] = chart_data['sector'].isin(highlight_sectors)
@@ -387,12 +392,9 @@ def render():
         )
 
         # 全てのテーマで視認性をあげるために、バブルと文字のアウトラインを設定
-        # is_highlight に応じて opacity と line width/color をカスタマイズ
-        # ※Streamlitのライトテーマに対応するため、白ではなくダークグレーを強調色に使用
-        # ※さらに、後で追加する「軌跡（線）」と同じ色で統一するため、少し洗練させる
-        marker_opacity = [1.0 if h else 0.4 for h in chart_data['is_highlight']]
+        marker_opacity = [1.0 if h else 0.35 for h in chart_data['is_highlight']] # 非ハイライトをさらに薄く
         marker_line_width = [1.5 if h else 0 for h in chart_data['is_highlight']]
-        marker_line_color = ['rgba(255,255,255,0.8)' if h else 'rgba(0,0,0,0)' for h in chart_data['is_highlight']] # ベースが黒テーマになったため白線に戻す
+        marker_line_color = ['rgba(255,255,255,0.8)' if h else 'rgba(0,0,0,0)' for h in chart_data['is_highlight']]
 
         # Marker と Text の更新
         fig_scatter.update_traces(
@@ -400,8 +402,8 @@ def render():
                 opacity=marker_opacity,
                 line=dict(width=marker_line_width, color=marker_line_color)
             ),
-            textposition='top center',
-            textfont=dict(size=14, weight="bold", color="white"), # 黒テーマ前提なので文字色も白に戻す
+            textposition='top right', # 文字がバブルの真上だと重なりやすいので右上に逃がす
+            textfont=dict(size=14, weight="bold", color="white"), 
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
@@ -420,13 +422,13 @@ def render():
                     
                     # 線の色を決定（最新のスコアに合わせて赤系か青系か）
                     score = float(chart_data.loc[chart_data['sector'] == sector_name, 'momentum_score'].iloc[0])
-                    line_color = "rgba(255,75,75,0.6)" if score >= 50 else "rgba(76,155,232,0.6)"
+                    line_color = "rgba(255,75,75,0.8)" if score >= 50 else "rgba(76,155,232,0.8)"
                     
                     fig_scatter.add_trace(go.Scatter(
                         x=x_vals,
                         y=y_vals,
                         mode='lines',
-                        line=dict(color=line_color, width=2.5, dash='dot'),
+                        line=dict(color=line_color, width=2.0, dash='dot'),
                         showlegend=False,
                         hoverinfo='skip'
                     ))
@@ -435,23 +437,24 @@ def render():
         max_abs_ppo = max(abs(chart_data["avg_ppo"].min()), abs(chart_data["avg_ppo"].max()), 1.0)
         
         # 基準線と帯域の追加（X=0, Y=50）
-        fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
-        fig_scatter.add_hline(y=50, line_dash="dash", line_color="gray")
+        fig_scatter.add_vline(x=0, line_dash="dash", line_color="rgba(255,255,255,0.3)")
+        fig_scatter.add_hline(y=50, line_dash="dash", line_color="rgba(255,255,255,0.3)")
         
-        # 「押し目エリア」等の注釈 (四隅に移動して透かし風に)
-        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=15, text="押し目エリア<br>(トレンド↑・過熱感↓)", showarrow=False, font=dict(color="#00D26A", size=12), opacity=0.35, align="right", xanchor="right", yanchor="bottom")
-        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=85, text="順張りエリア<br>(トレンド↑・過熱感↑)", showarrow=False, font=dict(color="#FF4B4B", size=12), opacity=0.35, align="right", xanchor="right", yanchor="top")
-        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=85, text="戻り売りエリア<br>(トレンド↓・過熱感↑)", showarrow=False, font=dict(color="#FFA500", size=12), opacity=0.35, align="left", xanchor="left", yanchor="top")
-        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=15, text="底値模索エリア<br>(トレンド↓・過熱感↓)", showarrow=False, font=dict(color="#4C9BE8", size=12), opacity=0.35, align="left", xanchor="left", yanchor="bottom")
+        # 「押し目エリア」等の注釈 (四隅により遠くへ配置してバブルと被らないようにする)
+        # 背景との同化を防ぐため、opacityを上げ、フォントサイズを少し大きくして見やすく調整
+        fig_scatter.add_annotation(x=max_abs_ppo*1.10, y=5, text="押し目エリア<br>トレンド↑・過熱感↓", showarrow=False, font=dict(color="#00D26A", size=13), opacity=0.7, align="right", xanchor="right", yanchor="bottom")
+        fig_scatter.add_annotation(x=max_abs_ppo*1.10, y=95, text="順張りエリア<br>トレンド↑・過熱感↑", showarrow=False, font=dict(color="#FF4B4B", size=13), opacity=0.7, align="right", xanchor="right", yanchor="top")
+        fig_scatter.add_annotation(x=-max_abs_ppo*1.10, y=95, text="戻り売りエリア<br>トレンド↓・過熱感↑", showarrow=False, font=dict(color="#FFA500", size=13), opacity=0.7, align="left", xanchor="left", yanchor="top")
+        fig_scatter.add_annotation(x=-max_abs_ppo*1.10, y=5, text="底値模索エリア<br>トレンド↓・過熱感↓", showarrow=False, font=dict(color="#4C9BE8", size=13), opacity=0.7, align="left", xanchor="left", yanchor="bottom")
 
         fig_scatter.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            height=450,
+            height=500, # 少し高さを出して余裕を持たせる
             xaxis_title="トレンドの強さ (PPO %)",
             yaxis_title="短期の加熱感 (RSI)",
-            xaxis=dict(range=[-max_abs_ppo*1.1, max_abs_ppo*1.1], zeroline=False, gridcolor="rgba(255,255,255,0.1)"),
-            yaxis=dict(range=[10, 90], zeroline=False, gridcolor="rgba(255,255,255,0.1)"),
+            xaxis=dict(range=[-max_abs_ppo*1.2, max_abs_ppo*1.2], zeroline=False, gridcolor="rgba(255,255,255,0.05)"),
+            yaxis=dict(range=[-5, 105], zeroline=False, gridcolor="rgba(255,255,255,0.05)"),
             coloraxis_colorbar=dict(title="スコア", thicknessmode="pixels", thickness=15, lenmode="pixels", len=200),
             margin=dict(l=20, r=20, t=30, b=20),
             hovermode="closest", # スマホでのツールチップ表示UXを考慮
@@ -533,7 +536,7 @@ def render():
         
         with st.expander("💡 テーブルの各項目の見方"):
             st.markdown("""
-            * **モメンタムスコア:** 4つの指標（騰落率、出来高倍率、25MA乖離率、騰落レシオ）を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強いと判断できます。
+            - **資金流入スコア**: 4つの指標（騰落率、出来高倍率、25MA乖離率、騰落レシオ）を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強いと判断できます。
             * **騰落率 (%):** 前日比の価格変化。セクター全体の現在の勢いを示します。
             * **出来高倍率 (x):** 過去5日平均に対する本日の出来高ペース（時間補正済）。1.5x以上なら大口の資金流入（本気度が高い）と判断できます。
             * **25MA乖離率 (%):** 25日移動平均線からの離れ具合。高すぎると高値掴みのリスク（加熱）、マイナスなら下落トレンドを意味します。
@@ -607,7 +610,7 @@ def render():
                 "セクター": st.column_config.TextColumn("セクター", width="medium"),
                 "代表銘柄": st.column_config.TextColumn(
                     "代表銘柄", 
-                    width="large",
+                    width="medium",
                     help="セクターを代表する主な上場企業"
                 ),
                 "モメンタムスコア": st.column_config.ProgressColumn(
