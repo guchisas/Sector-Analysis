@@ -235,7 +235,7 @@ def get_advanced_sector_summary(date: str = None) -> pd.DataFrame:
         SELECT
             sector,
             COUNT(*) as stock_count,
-            SUM(CASE WHEN percent_change > 0 THEN 1 ELSE 0 END) as up_count,
+            SUM(CASE WHEN percent_change > 0.01 THEN 1 ELSE 0 END) as up_count,
             AVG(rsi) as avg_rsi,
             AVG(volume_ratio) as avg_volume_ratio,
             SUM(close * volume) as trading_value,

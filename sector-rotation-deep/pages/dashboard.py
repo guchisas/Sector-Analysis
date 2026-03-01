@@ -551,13 +551,21 @@ def render():
             vol_ratio = row['avg_volume_ratio']
             ppo = row['avg_ppo']
             rsi = row['avg_rsi']
+            breadth = row['up_down_ratio'] # 値は 0〜100
             
-            if vol_ratio >= 1.5 and score >= 70:
+            # ハリボテ上昇判定（スコアが高いのに波及度が低い）
+            if score >= 65 and breadth <= 30:
+                return "⚠️ ハリボテ警戒"
+            elif vol_ratio >= 1.5 and score >= 70 and breadth >= 80:
+                return "🔥 最強の波(全面高)"
+            elif vol_ratio >= 1.5 and score >= 70:
                 return "🔥 資金流入"
             elif score >= 70 and ppo >= 15:
                 return "⚠️ 加熱警戒"
             elif ppo > 0 and pd.notna(rsi) and rsi < 40:
                 return "💎 押し目"
+            elif ppo < -5 and breadth <= 10:
+                return "🧊 総悲観(底打ち待機)"
             elif ppo < -5:
                 return "🧊 氷河期"
             return "-"
@@ -565,7 +573,7 @@ def render():
         display_df['Signal'] = display_df.apply(get_signal, axis=1)
             
         display_df = display_df[["Signal", "sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]]
-        display_df.columns = ["シグナル", "セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "騰落レシオ (%)"]
+        display_df.columns = ["シグナル", "セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "資金の波及度 (%)"]
         
         # モメンタムスコアで降順
         display_df = display_df.sort_values("モメンタムスコア", ascending=False)
@@ -602,7 +610,7 @@ def render():
             hide_index=True,
             use_container_width=True,
             column_config={
-                "シグナル": st.column_config.TextColumn("シグナル", width="small"),
+                "シグナル": st.column_config.TextColumn("シグナル", width="medium"),
                 "セクター": st.column_config.TextColumn("セクター", width="medium"),
                 "代表銘柄": st.column_config.TextColumn(
                     "代表銘柄", 
@@ -631,10 +639,12 @@ def render():
                     help="25日移動平均線からの乖離度合い。トレンドの強さと過熱感を示す。",
                     format="%+.2f %%"
                 ),
-                "騰落レシオ (%)": st.column_config.NumberColumn(
-                    "騰落レシオ",
-                    help="セクター内で今日値上がりしている銘柄の割合。セクター全体の同調率。",
-                    format="%.1f %%"
+                "資金の波及度 (%)": st.column_config.ProgressColumn(
+                    "資金の波及度 (Breadth)",
+                    help="セクター内で今日値上がりしている銘柄の割合。高いほどセクター全体が買われている本物のトレンド。",
+                    format="%.0f %%",
+                    min_value=0,
+                    max_value=100,
                 )
             },
             height=600
