@@ -142,8 +142,31 @@ def render():
     </div>
     """, unsafe_allow_html=True)
 
+    # ===== 本日の相場天気予報（相場モード） =====
+    st.markdown("<br>", unsafe_allow_html=True)
+    if not sector_summary.empty:
+        avg_up_ratio = sector_summary["up_down_ratio"].mean() * 100
+        avg_ppo_total = sector_summary["avg_ppo"].mean()
+        
+        if avg_up_ratio >= 60 and avg_ppo_total > 0:
+            weather_icon, weather_title, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", "市場全体に資金が流入しています。強いトレンドを持つトップセクターへの順張りが有効な地合いです。"
+        elif avg_up_ratio <= 40 and avg_ppo_total < 0:
+            weather_icon, weather_title, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", "市場全体から資金が流出しています。安易なナンピンは避け、底打ちからのリバウンド（逆張り）やディフェンシブ銘柄を狙う地合いです。"
+        else:
+            weather_icon, weather_title, weather_color, weather_desc = "☁️", "様子見（選別物色・もみ合い相場）", "#FFA500", "全体的な方向感が乏しい状態です。資金が一部のテーマや個別銘柄に集中する「循環物色」が起きやすい地合いです。"
+            
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, rgba(30,40,55,0.95) 0%, rgba(15,20,30,0.95) 100%); border-left: 5px solid {weather_color}; padding: 15px 20px; border-radius: 6px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+            <div style="font-size: 0.9rem; color: #a0a0a0; font-weight: 600; letter-spacing: 1px; margin-bottom: 5px;">本日の相場天気予報</div>
+            <div style="font-size: 1.6rem; font-weight: bold; color: {weather_color}; margin-bottom: 8px;">
+                {weather_icon} {weather_title}
+            </div>
+            <div style="font-size: 0.95rem; color: #d0d0d0; line-height: 1.5;">{weather_desc}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # ===== 市場概況（地合い）エリア =====
-    st.markdown(section_header("市場概況（地合い）", "🌐"), unsafe_allow_html=True)
+    st.markdown(section_header("指標・マクロ概況", "🌐"), unsafe_allow_html=True)
 
     # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
     @st.cache_data(ttl=3600, show_spinner="📡 主要指数を取得中...")
@@ -365,9 +388,11 @@ def render():
 
         # 全てのテーマで視認性をあげるために、バブルと文字のアウトラインを設定
         # is_highlight に応じて opacity と line width/color をカスタマイズ
+        # ※Streamlitのライトテーマに対応するため、白ではなくダークグレーを強調色に使用
+        # ※さらに、後で追加する「軌跡（線）」と同じ色で統一するため、少し洗練させる
         marker_opacity = [1.0 if h else 0.4 for h in chart_data['is_highlight']]
         marker_line_width = [1.5 if h else 0 for h in chart_data['is_highlight']]
-        marker_line_color = ['rgba(255,255,255,0.8)' if h else 'rgba(0,0,0,0)' for h in chart_data['is_highlight']]
+        marker_line_color = ['rgba(255,255,255,0.8)' if h else 'rgba(0,0,0,0)' for h in chart_data['is_highlight']] # ベースが黒テーマになったため白線に戻す
 
         # Marker と Text の更新
         fig_scatter.update_traces(
@@ -376,10 +401,35 @@ def render():
                 line=dict(width=marker_line_width, color=marker_line_color)
             ),
             textposition='top center',
-            textfont=dict(size=13, weight="bold", color="white"), # 強調テキストのフォント設定
+            textfont=dict(size=14, weight="bold", color="white"), # 黒テーマ前提なので文字色も白に戻す
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
+        
+        # === 軌跡（しっぽ/矢印）の描画を追加 ===
+        from modules.db_manager import get_sector_trajectory
+        trajectory_df = get_sector_trajectory(latest_date, days=3)
+        
+        if not trajectory_df.empty:
+            for sector_name in highlight_sectors:
+                sec_hist = trajectory_df[trajectory_df['sector'] == sector_name]
+                if len(sec_hist) > 1:
+                    # 過去から現在へ線を引く (X: ppo, Y: rsi)
+                    x_vals = sec_hist['avg_ppo'].tolist()
+                    y_vals = sec_hist['avg_rsi'].tolist()
+                    
+                    # 線の色を決定（最新のスコアに合わせて赤系か青系か）
+                    score = float(chart_data.loc[chart_data['sector'] == sector_name, 'momentum_score'].iloc[0])
+                    line_color = "rgba(255,75,75,0.6)" if score >= 50 else "rgba(76,155,232,0.6)"
+                    
+                    fig_scatter.add_trace(go.Scatter(
+                        x=x_vals,
+                        y=y_vals,
+                        mode='lines',
+                        line=dict(color=line_color, width=2.5, dash='dot'),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
         
         # 常に中心（0, 50）が表示されるように軸範囲を調整
         max_abs_ppo = max(abs(chart_data["avg_ppo"].min()), abs(chart_data["avg_ppo"].max()), 1.0)

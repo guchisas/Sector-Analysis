@@ -191,6 +191,34 @@ def get_sector_history_stats(date: str = None, days: int = 20) -> pd.DataFrame:
         
     return df
 
+def get_sector_trajectory(date: str = None, days: int = 4) -> pd.DataFrame:
+    """
+    指定した日付から過去N日間（デフォルト4日＝本日＋過去3日分）の
+    各セクターの平均PPOとRSIを取得する。
+    散布図（レーダーチャート）の軌跡（しっぽ）描画に使用する。
+    """
+    if date is None:
+        date = get_latest_date()
+    if not date:
+        return pd.DataFrame()
+
+    conn = get_connection()
+    df = pd.read_sql_query(f"""
+        SELECT date, sector, AVG(ppo) as avg_ppo, AVG(rsi) as avg_rsi
+        FROM market_data
+        WHERE date <= ? AND date >= date(?, '-{days * 2} days') -- 休場日を考慮
+        GROUP BY date, sector
+        ORDER BY date DESC
+    """, conn, params=(date, date))
+    conn.close()
+    
+    if not df.empty:
+        dates = df['date'].unique()
+        target_dates = dates[:days]
+        df = df[df['date'].isin(target_dates)].sort_values(['sector', 'date'])
+        
+    return df
+
 
 def get_advanced_sector_summary(date: str = None) -> pd.DataFrame:
     """
