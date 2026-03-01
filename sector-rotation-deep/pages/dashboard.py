@@ -374,13 +374,12 @@ def render():
 
         fig_scatter.update_traces(
             textposition='top center',
-            textfont=dict(size=11, color="white", weight="bold"),
+            textfont=dict(size=11, weight="bold"), # 文字色を自動（Streamlitテーマ依存）にしてライトモードでも読めるようにする
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
         
         fig_scatter.update_layout(
-            template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             height=450,
@@ -469,6 +468,7 @@ def render():
         
         with st.expander("💡 テーブルの各項目の見方"):
             st.markdown("""
+            * **モメンタムスコア:** 4つの指標（騰落率、出来高倍率、25MA乖離率、騰落レシオ）を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強いと判断できます。
             * **騰落率 (%):** 前日比の価格変化。セクター全体の現在の勢いを示します。
             * **出来高倍率 (x):** 過去5日平均に対する本日の出来高ペース（時間補正済）。1.5x以上なら大口の資金流入（本気度が高い）と判断できます。
             * **25MA乖離率 (%):** 25日移動平均線からの離れ具合。高すぎると高値掴みのリスク（加熱）、マイナスなら下落トレンドを意味します。
