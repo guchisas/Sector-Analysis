@@ -116,48 +116,41 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 
 def _execute_gemini_call(prompt: str, api_key: str) -> str:
     """
-    利用可能なモデルを順番に試し、429制限や404エラーを回避して回答を取得する
+    Gemini APIを呼び出す。
+    429制限や無駄なリクエストを避けるため、モデルの自動取得や不要なループ処理を削減。
     """
     import google.generativeai as genai
+    from google.api_core.exceptions import ResourceExhausted
+
     genai.configure(api_key=api_key)
     
-    # 使用可能なモデルを取得（generateContentをサポートするもの）
-    try:
-        available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-    except Exception:
-        available_models = []
-
-    # 優先して試すモデルのリスト（無料枠が多くて速いものを優先）
-    preferred_models = [
-        "models/gemini-1.5-flash",        # 1. 無料枠大・高速
-        "models/gemini-1.5-flash-latest", # 2. エイリアス
-        "models/gemini-2.0-flash",        # 3. 最新の主力
-        "models/gemini-1.5-pro",          # 4. 高精度
-        "models/gemini-pro"               # 5. フォールバック
-    ]
-    
-    models_to_try = [m for m in preferred_models if m in available_models]
-    if not models_to_try and available_models:
-        models_to_try = [available_models[0]]
-        
-    if not models_to_try:
-        models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash"] # 取得失敗時の決め打ち
+    # 決め打ちで高速かつ強力な最新モデルを使用（無駄な list_models リクエストを避ける）
+    # 画像の制限を見る限り、Gemini 2.5 Flash Lite もフォールバックとして追加する価値あり
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
         
     last_error = None
     for model_name in models_to_try:
         try:
-            # "models/" を除去した短縮名に直す（一部環境の404対策）
-            short_name = model_name.replace("models/", "")
-            model = genai.GenerativeModel(short_name)
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             if response.text:
                 return response.text
+        except ResourceExhausted as e:
+            # 429 Quota エラー（制限超過）の場合
+            last_error = (
+                "🚨 **APIの利用制限（429エラー: Quota Exceeded）に達しました。**\n\n"
+                "Google AI Studioの無料枠では、お使いのアカウント・地域によって **「1日20回まで (20 RPD)」** という非常に厳しい制限が設定されている場合があります。\n\n"
+                "**【解決策】**\n"
+                "Google AI Studioの設定（[Billing設定](https://aistudio.google.com/app/billing)）から**「従量課金（Pay-as-you-go）」**を有効にしてください。 "
+                "Gemini 1.5/2.0 Flashは非常に安価（1回数円未満）なので、個人利用の範囲であれば実質無料に近い金額で制限を大幅に解除できます。"
+            )
+            break
         except Exception as e:
             last_error = str(e)
-            # 429 Quota エラーなどの場合は次のモデルを試す
+            # 404など他のエラーの場合は次のモデル（フォールバック）を試す
             continue
             
-    raise Exception(f"全モデルの呼び出しに失敗しました。最後のエラー: {last_error}")
+    raise Exception(f"モデルの呼び出しに失敗しました。詳細: {last_error}")
 
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                         volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
@@ -269,65 +262,6 @@ def clear_shared_ai_insight():
     # get_shared_ai_insight 内の _run_analysis のキャッシュクリア
     st.cache_data.clear()
 
-def _build_swing_prompt(ticker: str, facts: dict) -> str:
-    """参考ちゃん（スイングアナリスト）への制約付きプロンプトを構築する"""
-    is_falling_knife = facts.get("is_falling_knife", False)
-    is_breakout = facts.get("is_breakout", False)
-    rr_ratio = facts.get("rr_ratio", 0.0)
-    
-    fact_text = f"""
-【対象銘柄】{ticker}
-【現在値】{facts.get('current_close', 0):,.1f} 円
-【25SMA】{facts.get('sma25', 0):,.1f} 円
-【75SMA】{facts.get('sma75', 0):,.1f} 円
-【直近40日最高値 (Pivot)】{facts.get('pivot_40d', 0):,.1f} 円
-【20日平均出来高】{facts.get('20d_avg_volume', 0):,.0f} 株
-【直近出来高】{facts.get('current_volume', 0):,.0f} 株
-
---- 判定フラグ ---
-・落ちるナイフ状態（現在値<25SMA<75SMA）: {is_falling_knife}
-・ブレイクアウト状態（現在値>Pivot かつ 出来高急増）: {is_breakout}
-
---- リスク・リワード計算 ---
-・想定Stop Loss（直近20日最安値）: {facts.get('stop_loss', 0):,.1f} 円
-・暫定Target: {facts.get('target', 0):,.1f} 円
-・R:R 比率: {rr_ratio:.2f}
-"""
-
-    prompt = f"""
-あなたはローリスク・ハイリターンを狙う冷徹かつ優秀なスイングトレーダー「参考ちゃん」です。
-以下のPythonが計算したテクニカルデータ（事実）のみに基づいて、現在の局面とアクションプランをMarkdownの箇条書き等の読みやすい形式で回答してください。
-
-{fact_text}
-
-【厳守すべきルール】
-ルール1: 「落ちるナイフ状態」がTrueであれば、どんな理由があろうと絶対に『見送り』を推奨すること。
-ルール2: 「R:R（リスクリワード）比率」が3.0未満の場合は、旨味が少ない勝負として明確に警告すること。
-ルール3: 断定的な予測は避け、ストップロスと利確目標を明記した戦略を具体的に提示すること。
-
-【出力フォーマット】必ず以下の3つのセクションに分けて出力してください。
-### ⚔️ 総合判定
-【見送り】【監視継続（押し目待ち）】【打診買い】【ブレイクアウト（Go）】などの端的な結論を最初に述べる。
-
-### 📊 テクニカル＆R:R評価
-Pythonで計算したSMAの状態やR:R比率を解説しつつ、現状のチャートの形を評価する。
-
-### 🎯 アクションプラン
-具体的なStop Lossライン（撤退線）とTarget（目標値）を明記した、次に取るべき行動の提案。
-"""
-    return prompt
-
-def analyze_swing_trade_with_gemini(ticker: str, technical_facts: dict) -> str:
-    """
-    個別銘柄のスイングトレード診断をGeminiで実行する
-    """
-    api_key = _get_api_key()
-    if not api_key:
-        return "⚠️ エラー: Gemini APIキーが設定されていません。"
-
-    try:
-        prompt = _build_swing_prompt(ticker, technical_facts)
-        return _execute_gemini_call(prompt, api_key)
-        
-    except Exception as e:
-        return f"⚠️ 診断中にエラーが発生しました。\n\n詳細: {str(e)}\n時間を置いてから再度お試しください。"
+# ------------------------------------------------------------------------------------------------
+# 以下、個別チャートの参考ちゃんAPI制限のため一時削除
+# ------------------------------------------------------------------------------------------------
