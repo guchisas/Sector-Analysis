@@ -491,60 +491,104 @@ def render():
             """)
         
         # 表示用のデータフレーム
-        display_df = chart_data[["sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]].copy()
+        display_df = chart_data[["sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio", "avg_rsi"]].copy()
         
         if "up_down_ratio" in display_df.columns:
             display_df["up_down_ratio"] = display_df["up_down_ratio"] * 100
+        
+        # 1. 「シグナル」列の自動判定ロジックを作成
+        def get_signal(row):
+            score = row['momentum_score']
+            vol_ratio = row['avg_volume_ratio']
+            ppo = row['avg_ppo']
+            rsi = row['avg_rsi']
             
-        display_df.columns = ["セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "騰落レシオ (%)"]
+            if vol_ratio >= 1.5 and score >= 70:
+                return "🔥 資金流入"
+            elif score >= 70 and ppo >= 15:
+                return "⚠️ 加熱警戒"
+            elif ppo > 0 and pd.notna(rsi) and rsi < 40:
+                return "💎 押し目"
+            elif ppo < -5:
+                return "🧊 氷河期"
+            return "-"
+
+        display_df['Signal'] = display_df.apply(get_signal, axis=1)
+            
+        display_df = display_df[["Signal", "sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]]
+        display_df.columns = ["シグナル", "セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "騰落レシオ (%)"]
         
         # モメンタムスコアで降順
         display_df = display_df.sort_values("モメンタムスコア", ascending=False)
         
-        # フォーマット
-        styled_df = display_df.style.format({
-            "モメンタムスコア": "{:.0f}",
-            "騰落率 (%)": "{:+.2f}%",
-            "出来高倍率 (x)": "{:.2f}x",
-            "25MA乖離率 (%)": "{:+.2f}%",
-            "騰落レシオ (%)": "{:.1f}%"
-        }).background_gradient(
-            subset=["モメンタムスコア"], cmap="RdYlGn_r", vmin=0, vmax=100
-        )
+        # Pandas Styler機能を用いたヒートマップ（背景色）の適用
+        def style_dataframe(v):
+            return None # dummy
+
+        def highlight_volume(val):
+            # 出来高倍率列: 値が 1.5 以上の場合、セルの背景色を「薄い赤色」
+            try:
+                if float(val) >= 1.5:
+                    return 'background-color: rgba(255,75,75,0.2)'
+            except:
+                pass
+            return ''
+
+        def highlight_ppo(val):
+            # 25MA乖離率列: 値が 0 未満の場合、セルの背景色を「薄い青色」
+            try:
+                if float(val) < 0:
+                    return 'background-color: rgba(76,155,232,0.2)'
+            except:
+                pass
+            return ''
+
+        # スタイルの適用
+        styled_df = display_df.style.applymap(highlight_volume, subset=["出来高倍率 (x)"]) \
+                                    .applymap(highlight_ppo, subset=["25MA乖離率 (%)"])
         
-        # ツールチップ付きカラム設定
+        # 2. Streamlit `column_config` を用いたリッチUI化
         st.dataframe(
             styled_df,
             hide_index=True,
             use_container_width=True,
             column_config={
-                "セクター": st.column_config.TextColumn("セクター"),
+                "シグナル": st.column_config.TextColumn("シグナル", width="small"),
+                "セクター": st.column_config.TextColumn("セクター", width="medium"),
                 "代表銘柄": st.column_config.TextColumn(
                     "代表銘柄", 
+                    width="large",
                     help="セクターを代表する主な上場企業"
                 ),
-                "モメンタムスコア": st.column_config.NumberColumn(
-                    "モメンタムスコア", 
-                    help="4つの指標を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強い。"
+                "モメンタムスコア": st.column_config.ProgressColumn(
+                    "資金流入スコア", 
+                    help="4つの指標を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強い。",
+                    format="%f",
+                    min_value=0,
+                    max_value=100,
                 ),
                 "騰落率 (%)": st.column_config.NumberColumn(
-                    "騰落率 (%)",
-                    help="セクター構成銘柄の前日比の平均。"
+                    "騰落率",
+                    help="セクター構成銘柄の前日比の平均。",
+                    format="%+.2f %%"
                 ),
                 "出来高倍率 (x)": st.column_config.NumberColumn(
-                    "出来高倍率 (x)",
-                    help="本日の予測出来高が過去5日平均の何倍か。1.5x以上は機関の介入の可能性大。"
+                    "出来高倍率",
+                    help="本日の予測出来高が過去5日平均の何倍か。1.5x以上は機関の介入の可能性大。",
+                    format="%.2f x"
                 ),
                 "25MA乖離率 (%)": st.column_config.NumberColumn(
-                    "25MA乖離率 (%)",
-                    help="25日移動平均線からの乖離度合い。トレンドの強さと過熱感を示す。"
+                    "25MA乖離",
+                    help="25日移動平均線からの乖離度合い。トレンドの強さと過熱感を示す。",
+                    format="%+.2f %%"
                 ),
                 "騰落レシオ (%)": st.column_config.NumberColumn(
-                    "騰落レシオ (%)",
-                    help="セクター内で今日値上がりしている銘柄の割合。セクター全体の同調率。"
+                    "騰落レシオ",
+                    help="セクター内で今日値上がりしている銘柄の割合。セクター全体の同調率。",
+                    format="%.1f %%"
                 )
             },
-            height=500
+            height=600
         )
 
     # ===== 出来高急増 TOP20 =====
