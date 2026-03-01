@@ -346,38 +346,39 @@ def render():
         # バブルサイズ調整（最小1倍、外れ値はクリップ）
         chart_data['bubble_size'] = chart_data['avg_volume_ratio'].clip(lower=1.0, upper=5.0)
         
-        # === 100点AIレーダーチャートへの大改修 ===
+        # === ステルス＆ナンバリング仕様への完全刷新 ===
         
-        # トップ3とワースト3を取得（これらにナンバリングを振る）
-        top3_df = chart_data.nlargest(3, 'momentum_score')
-        worst3_df = chart_data.nsmallest(3, 'momentum_score')
+        # トップ5とワースト5を取得
+        top5_df = chart_data.nlargest(5, 'momentum_score')
+        worst5_df = chart_data.nsmallest(5, 'momentum_score')
         
-        top3_sectors = top3_df['sector'].tolist()
-        worst3_sectors = worst3_df['sector'].tolist()
+        top5_sectors = top5_df['sector'].tolist()
+        worst5_sectors = worst5_df['sector'].tolist()
         
-        # ハイライト対象（軌跡と枠線を出す対象）も3に絞って限りなくノイズを消す
-        highlight_sectors = top3_sectors + worst3_sectors
+        # 1. バブルの描画プロパティ（色、不透明度、ラベル）を付与
+        def get_bubble_style(sector):
+            if sector in top5_sectors:
+                # トップ5: 濃い赤色、半透明(密集時ヒートマップ化)
+                idx = top5_sectors.index(sector)
+                number_label = ["①", "②", "③", "④", "⑤"][idx]
+                return pd.Series(["crimson", 0.85, number_label, 1.5, "rgba(255,255,255,0.5)"])
+            elif sector in worst5_sectors:
+                # ワースト5: 鮮やかな青色、くっきり、ラベルなし
+                return pd.Series(["royalblue", 1.0, "", 1.5, "rgba(255,255,255,0.5)"])
+            else:
+                # その他23セクター（ステルス化）
+                return pd.Series(["lightgray", 0.15, "", 0, "rgba(0,0,0,0)"])
+                
+        chart_data[["bubble_color", "bubble_opacity", "display_label", "line_width", "line_color"]] = chart_data["sector"].apply(get_bubble_style)
         
-        # ナンバリングのマッピングを作成
-        top3_markers = {s: f"①" if i==0 else f"②" if i==1 else f"③" for i, s in enumerate(top3_sectors)}
-        worst3_markers = {s: f"❶" if i==0 else f"❷" if i==1 else f"❸" for i, s in enumerate(worst3_sectors)}
+        # ステルスバブルを小さくするためのサイズ調整（全体的な外れ値クリップ適用後、トップ層以外をさらに縮小）
+        chart_data['bubble_size'] = chart_data['avg_volume_ratio'].clip(lower=1.0, upper=5.0)
+        chart_data.loc[~chart_data['sector'].isin(top5_sectors + worst5_sectors), 'bubble_size'] = 1.0 # ステルスは最小サイズ固定
         
-        # 1. ラベル用列の作成（数字のみを設定して文字被りを根絶する）
-        def get_display_label(sector):
-            if sector in top3_markers: return top3_markers[sector]
-            if sector in worst3_markers: return worst3_markers[sector]
-            return ""
-            
-        chart_data['display_label'] = chart_data['sector'].apply(get_display_label)
-        
-        # 2. 強調用のフラグとスタイル設定列を作成
-        chart_data['is_highlight'] = chart_data['sector'].isin(highlight_sectors)
-        
-        # 代表銘柄の統合
+        # 代表銘柄の統合とホバーテキスト
         from utils.constants import REPRESENTATIVE_STOCKS
         chart_data['representative_stocks'] = chart_data['sector'].map(REPRESENTATIVE_STOCKS).fillna('')
         
-        # カスタムホバーテキスト
         chart_data['hover_text'] = chart_data.apply(
             lambda r: (
                 f"<b>{r['sector']}</b> ({r['representative_stocks']})<br>"
@@ -393,27 +394,20 @@ def render():
             x="avg_ppo",
             y="avg_rsi",
             size="bubble_size",
-            color="momentum_score",
             text="display_label",
-            color_continuous_scale="RdYlBu_r", # 赤系=高スコア、青系=低スコア
             hover_name="sector",
-            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "display_label": False, "is_highlight": False, "hover_text": True},
-            range_color=[0, 100],
+            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "sector": False, "display_label": False, "bubble_color": False, "bubble_opacity": False, "line_width": False, "line_color": False, "hover_text": True},
         )
 
-        # 全てのテーマで視認性をあげるために、バブルと文字のアウトラインを設定
-        marker_opacity = [1.0 if h else 0.25 for h in chart_data['is_highlight']] # 非ハイライトは背景と同化させるレベルまで薄くする(0.25)
-        marker_line_width = [2.0 if h else 0 for h in chart_data['is_highlight']]
-        marker_line_color = ['rgba(255,255,255,0.9)' if h else 'rgba(0,0,0,0)' for h in chart_data['is_highlight']]
-
-        # Marker と Text の更新
+        # Plotly ExpressのデフォルトColorScaleを無効化し、カスタム色と透明度・枠線を各マーカーに直接適用
         fig_scatter.update_traces(
             marker=dict(
-                opacity=marker_opacity,
-                line=dict(width=marker_line_width, color=marker_line_color)
+                color=chart_data['bubble_color'],
+                opacity=chart_data['bubble_opacity'],
+                line=dict(width=chart_data['line_width'], color=chart_data['line_color'])
             ),
-            textposition='middle center', # 番号なのでなんとバブルのド真ん中に配置！これで絶対にズレない。
-            textfont=dict(size=16, weight="bold", color="white"), # 大きくて太い白抜き文字
+            textposition='middle center', # 赤バブルのど真ん中に数字を配置
+            textfont=dict(size=14, weight="bold", color="white"), # 数字は白抜き
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
@@ -424,115 +418,42 @@ def render():
         min_x = -max_x
         min_y = -5
         max_y = 105
-
-        # === 四象限の背景ヒートマップ（色分け）===
-        # 押し目 (Bottom Right: x>0, y<50) -> Green
-        fig_scatter.add_shape(type="rect", x0=0, y0=min_y, x1=max_x, y1=50, fillcolor="rgba(0, 210, 106, 0.05)", line_width=0, layer="below")
-        # 順張り (Top Right: x>0, y>50) -> Red
-        fig_scatter.add_shape(type="rect", x0=0, y0=50, x1=max_x, y1=max_y, fillcolor="rgba(255, 75, 75, 0.05)", line_width=0, layer="below")
-        # 戻り売り (Top Left: x<0, y>50) -> Orange
-        fig_scatter.add_shape(type="rect", x0=min_x, y0=50, x1=0, y1=max_y, fillcolor="rgba(255, 165, 0, 0.05)", line_width=0, layer="below")
-        # 底値模索 (Bottom Left: x<0, y<50) -> Blue
-        fig_scatter.add_shape(type="rect", x0=min_x, y0=min_y, x1=0, y1=50, fillcolor="rgba(76, 155, 232, 0.05)", line_width=0, layer="below")
-
-        # === 軌跡（明確なベクトル矢印）の描画を追加 ===
-        from modules.db_manager import get_sector_trajectory
-        trajectory_df = get_sector_trajectory(latest_date, days=3)
-        
-        if not trajectory_df.empty:
-            for sector_name in highlight_sectors:
-                sec_hist = trajectory_df[trajectory_df['sector'] == sector_name]
-                if len(sec_hist) > 1:
-                    # sec_histは日付降順なので iloc[-1]が過去、iloc[0]が現在（バブル位置）
-                    oldest = sec_hist.iloc[-1]
-                    newest = sec_hist.iloc[0]
-                    
-                    # 線の色を決定（最新のスコアに合わせて赤系か青系か）
-                    score = float(chart_data.loc[chart_data['sector'] == sector_name, 'momentum_score'].iloc[0])
-                    arrow_color = "rgba(255,100,100,0.8)" if score >= 50 else "rgba(100,150,255,0.8)"
-                    
-                    # Plotlyのannotationを使って過去から現在への矢印を描画
-                    fig_scatter.add_annotation(
-                        x=newest['avg_ppo'],
-                        y=newest['avg_rsi'],
-                        ax=oldest['avg_ppo'],
-                        ay=oldest['avg_rsi'],
-                        xref='x',
-                        yref='y',
-                        axref='x',
-                        ayref='y',
-                        showarrow=True,
-                        arrowhead=2, # 綺麗な三角矢印
-                        arrowsize=1.5,
-                        arrowwidth=2.5,
-                        arrowcolor=arrow_color,
-                        opacity=0.8
-                    )
         
         # 基準線と帯域の追加（X=0, Y=50）
         fig_scatter.add_vline(x=0, line_dash="dash", line_color="rgba(255,255,255,0.2)")
         fig_scatter.add_hline(y=50, line_dash="dash", line_color="rgba(255,255,255,0.2)")
         
-        # 「押し目エリア」等の注釈 (背景色がついたので文字はより控えめに)
-        fig_scatter.add_annotation(x=max_x*0.95, y=5, text="安全圏<br>(押し目買いエリア)", showarrow=False, font=dict(color="#00D26A", size=13), opacity=0.8, align="right", xanchor="right", yanchor="bottom")
-        fig_scatter.add_annotation(x=max_x*0.95, y=95, text="警戒圏<br>(過熱・順張りエリア)", showarrow=False, font=dict(color="#FF4B4B", size=13), opacity=0.8, align="right", xanchor="right", yanchor="top")
-        fig_scatter.add_annotation(x=min_x*0.95, y=95, text="撤退圏<br>(戻り売りエリア)", showarrow=False, font=dict(color="#FFA500", size=13), opacity=0.8, align="left", xanchor="left", yanchor="top")
-        fig_scatter.add_annotation(x=min_x*0.95, y=5, text="氷河期<br>(底値模索エリア)", showarrow=False, font=dict(color="#4C9BE8", size=13), opacity=0.8, align="left", xanchor="left", yanchor="bottom")
+        # 「押し目エリア」等の注釈 (背景色がついたので文字はより控えめに、明るく)
+        fig_scatter.add_annotation(x=max_x*0.95, y=5, text="安全圏<br>(押し目買いエリア)", showarrow=False, font=dict(color="lightgray", size=13), opacity=0.8, align="right", xanchor="right", yanchor="bottom")
+        fig_scatter.add_annotation(x=max_x*0.95, y=95, text="警戒圏<br>(過熱・順張りエリア)", showarrow=False, font=dict(color="lightgray", size=13), opacity=0.8, align="right", xanchor="right", yanchor="top")
+        fig_scatter.add_annotation(x=min_x*0.95, y=95, text="撤退圏<br>(戻り売りエリア)", showarrow=False, font=dict(color="lightgray", size=13), opacity=0.8, align="left", xanchor="left", yanchor="top")
+        fig_scatter.add_annotation(x=min_x*0.95, y=5, text="氷河期<br>(底値模索エリア)", showarrow=False, font=dict(color="lightgray", size=13), opacity=0.8, align="left", xanchor="left", yanchor="bottom")
 
         fig_scatter.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            height=500, # 少し高さを出して余裕を持たせる
+            height=500,
             xaxis_title="トレンドの強さ (PPO %)",
             yaxis_title="短期の加熱感 (RSI)",
             xaxis=dict(range=[min_x, max_x], zeroline=False, gridcolor="rgba(255,255,255,0.05)"),
             yaxis=dict(range=[min_y, max_y], zeroline=False, gridcolor="rgba(255,255,255,0.05)"),
-            coloraxis_colorbar=dict(title="スコア", thicknessmode="pixels", thickness=15, lenmode="pixels", len=200),
             margin=dict(l=20, r=20, t=30, b=20),
-            hovermode="closest", # スマホでのツールチップ表示UXを考慮
+            hovermode="closest",
         )
-        # st.plotly_chartの直前に描画
         st.plotly_chart(fig_scatter, use_container_width=True)
 
-        # === 注目セクター速報パネルの描画 ===
-        def format_panel_item(sector_name, m_score):
-            return f"{sector_name} <span style='font-size:0.85em; color:#aaa;'>(スコア: {int(m_score)})</span>"
-
-        top1_info = format_panel_item(top3_sectors[0], top3_df.iloc[0]['momentum_score']) if len(top3_sectors) > 0 else "-"
-        top2_info = format_panel_item(top3_sectors[1], top3_df.iloc[1]['momentum_score']) if len(top3_sectors) > 1 else "-"
-        top3_info = format_panel_item(top3_sectors[2], top3_df.iloc[2]['momentum_score']) if len(top3_sectors) > 2 else "-"
-
-        worst1_info = format_panel_item(worst3_sectors[0], worst3_df.iloc[0]['momentum_score']) if len(worst3_sectors) > 0 else "-"
-        worst2_info = format_panel_item(worst3_sectors[1], worst3_df.iloc[1]['momentum_score']) if len(worst3_sectors) > 1 else "-"
-        worst3_info = format_panel_item(worst3_sectors[2], worst3_df.iloc[2]['momentum_score']) if len(worst3_sectors) > 2 else "-"
-
+        # === レーダー直下への「凡例（トップ5リスト）」の自動配置 ===
+        top5_names = top5_df['sector'].tolist()
+        legend_items = []
+        numbers = ["①", "②", "③", "④", "⑤"]
+        for i, name in enumerate(top5_names):
+            legend_items.append(f"{numbers[i]} {name}")
+            
+        legend_text = " | ".join(legend_items)
         st.markdown(f"""
-        <div style='background-color: rgba(255,255,255,0.03); padding: 15px 20px; border-radius: 8px; margin-top: -10px; margin-bottom: 25px; border: 1px solid rgba(255,255,255,0.08);'>
-            <div style='font-size: 0.95em; font-weight: bold; color: #fff; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;'>
-                🎯 注目セクター解説（レーダーマップ上の番号）
-            </div>
-            <div style='display: flex; gap: 20px; flex-wrap: wrap;'>
-                <div style='flex: 1; min-width: 250px;'>
-                    <div style='color: #FF4B4B; font-weight: bold; margin-bottom: 8px; font-size: 0.95em;'>🔥 資金流入トップ3 (赤色)</div>
-                    <div style='padding-left: 5px; line-height: 1.6;'>
-                        <div><span style='background:#444; color:#fff; padding:0 5px; border-radius:3px; margin-right:5px; font-size:0.8em;'>①</span> {top1_info}</div>
-                        <div><span style='background:#444; color:#fff; padding:0 5px; border-radius:3px; margin-right:5px; font-size:0.8em;'>②</span> {top2_info}</div>
-                        <div><span style='background:#444; color:#fff; padding:0 5px; border-radius:3px; margin-right:5px; font-size:0.8em;'>③</span> {top3_info}</div>
-                    </div>
-                </div>
-                <div style='flex: 1; min-width: 250px;'>
-                    <div style='color: #4C9BE8; font-weight: bold; margin-bottom: 8px; font-size: 0.95em;'>🧊 資金流出ワースト3 (青色)</div>
-                    <div style='padding-left: 5px; line-height: 1.6;'>
-                        <div><span style='background:#444; color:#fff; padding:0 5px; border-radius:3px; margin-right:5px; font-size:0.8em;'>❶</span> {worst1_info}</div>
-                        <div><span style='background:#444; color:#fff; padding:0 5px; border-radius:3px; margin-right:5px; font-size:0.8em;'>❷</span> {worst2_info}</div>
-                        <div><span style='background:#444; color:#fff; padding:0 5px; border-radius:3px; margin-right:5px; font-size:0.8em;'>❸</span> {worst3_info}</div>
-                    </div>
-                </div>
-            </div>
-            <div style='font-size: 0.8em; color: #888; margin-top: 15px;'>
-                ※バブルから伸びる<b>矢印線</b>は、直近3日間のモメンタムの移動ベクトル（勢いと方向）を示しています。<br>
-                ※背景の<b>緑ゾーン</b>は押し目買いの安全圏、<b>赤ゾーン</b>は高値掴み警戒圏を示します。
-            </div>
+        <div style='background-color: rgba(220, 20, 60, 0.1); padding: 12px 20px; border-radius: 6px; border-left: 5px solid crimson; margin-top: -15px; margin-bottom: 25px;'>
+            <span style='font-size: 1.1em; color: white;'>**🔥 今日の主役 (資金流入トップ5):**</span><br>
+            <span style='font-size: 1.05em; color: #e0e0e0; line-height: 1.8; font-weight: bold;'>{legend_text}</span>
         </div>
         """, unsafe_allow_html=True)
 
