@@ -356,29 +356,31 @@ def render():
             hover_name="sector",
             hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "display_label": False, "hover_text": True},
             range_color=[0, 100],
-            opacity=0.85, # バブルの透明度を設定し重なりを見やすくする
+            opacity=0.65, # 透明度を下げて文字を見やすくする
         )
 
-        # 常に中心（0, 50）が表示されるように軸範囲を調整
-        max_abs_ppo = max(abs(chart_data["avg_ppo"].min()), abs(chart_data["avg_ppo"].max()), 1.0)
-        
-        # 基準線と帯域の追加（X=0, Y=50）
-        fig_scatter.add_vline(x=0, line_dash="dash", line_color="rgba(255,255,255,0.4)")
-        fig_scatter.add_hline(y=50, line_dash="dash", line_color="rgba(255,255,255,0.4)")
-        
-        # 「押し目エリア」等の注釈 (四隅に移動して透かし風に)
-        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=15, text="押し目エリア<br>(トレンド↑・過熱感↓)", showarrow=False, font=dict(color="#00D26A", size=12), opacity=0.35, align="right", xanchor="right", yanchor="bottom")
-        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=85, text="順張りエリア<br>(トレンド↑・過熱感↑)", showarrow=False, font=dict(color="#FF4B4B", size=12), opacity=0.35, align="right", xanchor="right", yanchor="top")
-        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=85, text="戻り売りエリア<br>(トレンド↓・過熱感↑)", showarrow=False, font=dict(color="#FFB347", size=12), opacity=0.35, align="left", xanchor="left", yanchor="top")
-        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=15, text="底値模索エリア<br>(トレンド↓・過熱感↓)", showarrow=False, font=dict(color="#4C9BE8", size=12), opacity=0.35, align="left", xanchor="left", yanchor="bottom")
-
+        # 全てのテーマで視認性をあげるために、バブルと文字のアウトラインを設定
         fig_scatter.update_traces(
+            marker=dict(line=dict(width=1.5, color='rgba(100,100,100,0.8)')),
             textposition='top center',
-            textfont=dict(size=11, weight="bold"), # 文字色を自動（Streamlitテーマ依存）にしてライトモードでも読めるようにする
+            textfont=dict(size=12, weight="bold"), # サイズを上げて太字
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
         
+        # 常に中心（0, 50）が表示されるように軸範囲を調整
+        max_abs_ppo = max(abs(chart_data["avg_ppo"].min()), abs(chart_data["avg_ppo"].max()), 1.0)
+        
+        # 基準線と帯域の追加（X=0, Y=50）
+        fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
+        fig_scatter.add_hline(y=50, line_dash="dash", line_color="gray")
+        
+        # 「押し目エリア」等の注釈 (四隅に移動して透かし風に)
+        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=15, text="押し目エリア<br>(トレンド↑・過熱感↓)", showarrow=False, font=dict(color="#00D26A", size=12), opacity=0.35, align="right", xanchor="right", yanchor="bottom")
+        fig_scatter.add_annotation(x=max_abs_ppo*1.05, y=85, text="順張りエリア<br>(トレンド↑・過熱感↑)", showarrow=False, font=dict(color="#FF4B4B", size=12), opacity=0.35, align="right", xanchor="right", yanchor="top")
+        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=85, text="戻り売りエリア<br>(トレンド↓・過熱感↑)", showarrow=False, font=dict(color="#FFA500", size=12), opacity=0.35, align="left", xanchor="left", yanchor="top")
+        fig_scatter.add_annotation(x=-max_abs_ppo*1.05, y=15, text="底値模索エリア<br>(トレンド↓・過熱感↓)", showarrow=False, font=dict(color="#4C9BE8", size=12), opacity=0.35, align="left", xanchor="left", yanchor="bottom")
+
         fig_scatter.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",

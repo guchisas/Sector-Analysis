@@ -114,11 +114,55 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
     return prompt
 
 
+def _execute_gemini_call(prompt: str, api_key: str) -> str:
+    """
+    利用可能なモデルを順番に試し、429制限や404エラーを回避して回答を取得する
+    """
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    
+    # 使用可能なモデルを取得（generateContentをサポートするもの）
+    try:
+        available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+    except Exception:
+        available_models = []
+
+    # 優先して試すモデルのリスト（無料枠が多くて速いものを優先）
+    preferred_models = [
+        "models/gemini-1.5-flash",        # 1. 無料枠大・高速
+        "models/gemini-1.5-flash-latest", # 2. エイリアス
+        "models/gemini-2.0-flash",        # 3. 最新の主力
+        "models/gemini-1.5-pro",          # 4. 高精度
+        "models/gemini-pro"               # 5. フォールバック
+    ]
+    
+    models_to_try = [m for m in preferred_models if m in available_models]
+    if not models_to_try and available_models:
+        models_to_try = [available_models[0]]
+        
+    if not models_to_try:
+        models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash"] # 取得失敗時の決め打ち
+        
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            # "models/" を除去した短縮名に直す（一部環境の404対策）
+            short_name = model_name.replace("models/", "")
+            model = genai.GenerativeModel(short_name)
+            response = model.generate_content(prompt)
+            if response.text:
+                return response.text
+        except Exception as e:
+            last_error = str(e)
+            # 429 Quota エラーなどの場合は次のモデルを試す
+            continue
+            
+    raise Exception(f"全モデルの呼び出しに失敗しました。最後のエラー: {last_error}")
+
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                         volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
     """
     Gemini APIを使用してセクターローテーション分析を実行する
-
     APIキー未設定やエラー時はフォールバックサマリーを返す
     """
     api_key = _get_api_key()
@@ -127,48 +171,8 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         return _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
 
     try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=api_key)
-        # 安定稼働する最新・安定版モデルのみ許可
-        available_models = [
-            m.name for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        # 優先順位リスト（最新・安定動作が確認されているモデル名へ更新）
-        preferred_models = [
-            "models/gemini-1.5-flash",        # 429エラー回避のため無料枠の多い1.5-flashを最優先に
-            "models/gemini-2.0-flash",        # 最新の主力モデル
-            "models/gemini-2.5-flash",        # 最新の高速版
-            "models/gemini-pro"               # 完全なフォールバック
-        ]
-        
-        selected_model = None
-        # 優先リストの上から順に、使えるものがあるかチェック
-        for p in preferred_models:
-            if p in available_models:
-                selected_model = p
-                break
-                
-        # 優先順位のものが見つからなければ、利用可能な最初のモデル（2.0以外）を使用
-        if not selected_model and available_models:
-            selected_model = available_models[0]
-            
-        if not selected_model:
-            raise Exception("有効なGemini生成モデルが見つかりません（無料枠制限の可能性）。")
-            
-        # パスプレフィックス "models/" を除去してモデル名を取得し、エラー耐性を高める
-        model_name = selected_model.replace("models/", "")
-        
-        try:
-            model = genai.GenerativeModel(selected_model) # 正式名称でトライ
-        except Exception:
-            model = genai.GenerativeModel(model_name) # ダメなら短い名前でトライ
-
         prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text)
-
-        response = model.generate_content(prompt)
-        return response.text
+        return _execute_gemini_call(prompt, api_key)
 
     except Exception as e:
         error_msg = f"⚠️ Gemini API エラー: {str(e)}\n\n"
@@ -322,22 +326,8 @@ def analyze_swing_trade_with_gemini(ticker: str, technical_facts: dict) -> str:
         return "⚠️ エラー: Gemini APIキーが設定されていません。"
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        
-        # gemini-1.5-flash を使用する (429対策)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
         prompt = _build_swing_prompt(ticker, technical_facts)
-        response = model.generate_content(prompt)
-        
-        return response.text
+        return _execute_gemini_call(prompt, api_key)
         
     except Exception as e:
-        # モデル名エラーのフォールバック
-        try:
-            model = genai.GenerativeModel("gemini-pro")
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as fallback_e:
-            return f"⚠️ 診断中にエラーが発生しました。\n\n詳細: {str(e)} / {str(fallback_e)}"
+        return f"⚠️ 診断中にエラーが発生しました。\n\n詳細: {str(e)}\n時間を置いてから再度お試しください。"
