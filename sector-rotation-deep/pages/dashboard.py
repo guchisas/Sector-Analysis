@@ -320,15 +320,20 @@ def render():
         # --------------------------------------------------
         st.markdown("<h4 style='margin-bottom:10px;'>🗺️ セクターローテーション・レーダー</h4>", unsafe_allow_html=True)
         
-        # Plotly Expressで散布図を作成
         # バブルサイズ調整（最小1倍、外れ値はクリップ）
         chart_data['bubble_size'] = chart_data['avg_volume_ratio'].clip(lower=1.0, upper=5.0)
         
-        # トップ3とワースト3のラベルのみ表示する
-        top3_sectors = chart_data.head(3)['sector'].tolist()
-        worst3_sectors = chart_data.tail(3)['sector'].tolist()
-        display_sectors = top3_sectors + worst3_sectors
-        chart_data['display_label'] = chart_data['sector'].apply(lambda x: x if x in display_sectors else "")
+        # === スポットライト効果の追加 ===
+        # トップ5とワースト5を取得
+        top5_sectors = chart_data.nlargest(5, 'momentum_score')['sector'].tolist()
+        worst5_sectors = chart_data.nsmallest(5, 'momentum_score')['sector'].tolist()
+        highlight_sectors = top5_sectors + worst5_sectors
+        
+        # 1. ラベル用列の作成（強調対象のみテキストを設定）
+        chart_data['display_label'] = chart_data['sector'].apply(lambda x: x if x in highlight_sectors else "")
+        
+        # 2. 強調用のフラグとスタイル設定列を作成
+        chart_data['is_highlight'] = chart_data['sector'].isin(highlight_sectors)
         
         # 代表銘柄の統合
         from utils.constants import REPRESENTATIVE_STOCKS
@@ -354,16 +359,24 @@ def render():
             text="display_label",
             color_continuous_scale="RdYlBu_r", # 赤系=高スコア、青系=低スコア
             hover_name="sector",
-            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "display_label": False, "hover_text": True},
+            hover_data={"avg_ppo": False, "avg_rsi": False, "bubble_size": False, "momentum_score": False, "sector": False, "display_label": False, "is_highlight": False, "hover_text": True},
             range_color=[0, 100],
-            opacity=0.65, # 透明度を下げて文字を見やすくする
         )
 
         # 全てのテーマで視認性をあげるために、バブルと文字のアウトラインを設定
+        # is_highlight に応じて opacity と line width/color をカスタマイズ
+        marker_opacity = [1.0 if h else 0.4 for h in chart_data['is_highlight']]
+        marker_line_width = [1.5 if h else 0 for h in chart_data['is_highlight']]
+        marker_line_color = ['rgba(255,255,255,0.8)' if h else 'rgba(0,0,0,0)' for h in chart_data['is_highlight']]
+
+        # Marker と Text の更新
         fig_scatter.update_traces(
-            marker=dict(line=dict(width=1.5, color='rgba(100,100,100,0.8)')),
+            marker=dict(
+                opacity=marker_opacity,
+                line=dict(width=marker_line_width, color=marker_line_color)
+            ),
             textposition='top center',
-            textfont=dict(size=12, weight="bold"), # サイズを上げて太字
+            textfont=dict(size=13, weight="bold", color="white"), # 強調テキストのフォント設定
             hovertemplate="%{customdata[0]}<extra></extra>",
             customdata=chart_data[['hover_text']]
         )
