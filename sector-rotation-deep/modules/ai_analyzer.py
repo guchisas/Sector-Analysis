@@ -138,9 +138,9 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         
         # 優先順位リスト（最新・安定動作が確認されているモデル名へ更新）
         preferred_models = [
-            "models/gemini-1.5-pro",          # 最も賢いモデル（推奨）
+            "models/gemini-2.0-flash",        # 最新の主力モデル
             "models/gemini-2.5-flash",        # 最新の高速版
-            "models/gemini-1.5-flash",        # フォールバックの高速版
+            "models/gemini-1.5-flash",        # 旧モデルのフォールバック
             "models/gemini-pro"               # 完全なフォールバック
         ]
         
@@ -326,8 +326,8 @@ def analyze_swing_trade_with_gemini(ticker: str, technical_facts: dict) -> str:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         
-        # 通常の分析と同様のモデル選択ロジック
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        # gemini-2.0-flash を使用する
+        model = genai.GenerativeModel("gemini-2.0-flash")
         
         prompt = _build_swing_prompt(ticker, technical_facts)
         response = model.generate_content(prompt)
@@ -337,7 +337,7 @@ def analyze_swing_trade_with_gemini(ticker: str, technical_facts: dict) -> str:
     except Exception as e:
         # モデル名エラーのフォールバック
         try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel("gemini-pro")
             response = model.generate_content(prompt)
             return response.text
         except Exception as fallback_e:

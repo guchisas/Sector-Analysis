@@ -193,7 +193,7 @@ def render():
     
     # ===== AIアナリスト（参考ちゃん）分析パネル =====
     st.markdown("<hr style='margin:40px 0; border:none; border-top:1px dashed #333;'>", unsafe_allow_html=True)
-    st.markdown("### 🦜👓 参考ちゃん先生のスイング分析")
+    st.markdown("### 🦜👓 参考ちゃんのスイング分析")
     
     # トレードロジックのFACT計算
     try:
@@ -248,7 +248,7 @@ def render():
         from modules.ai_analyzer import analyze_swing_trade_with_gemini
         
         # 分析実行ボタン（API制限回避のオンデマンド）
-        if st.button("✨ 参考ちゃん先生に分析を依頼する", type="primary"):
+        if st.button("✨ 参考ちゃんに分析を依頼する", type="primary"):
             with st.spinner("思考中...（事実に基づく戦略を構築しています）"):
                 ai_report = analyze_swing_trade_with_gemini(selected_ticker, technical_facts)
                 
