@@ -168,8 +168,9 @@ def render():
     # ===== 市場概況（地合い）エリア =====
     st.markdown(section_header("指標・マクロ概況", "🌐"), unsafe_allow_html=True)
 
-    # サーバーサイドキャッシュ（全ユーザー共有・1時間更新）
-    @st.cache_data(ttl=3600, show_spinner="📡 主要指数を取得中...")
+    # サーバーサイドキャッシュ（全ユーザー共有・1分更新）
+    # ※ページ更新時に最新データを表示できるよう、キャッシュ期間（TTL）を3600秒から60秒に短縮しました。
+    @st.cache_data(ttl=60, show_spinner="📡 主要指数を取得中...")
     def _cached_market_overview():
         return fetch_market_overview()
 
@@ -578,6 +579,24 @@ def render():
         # モメンタムスコアで降順
         display_df = display_df.sort_values("モメンタムスコア", ascending=False)
         
+        st.markdown("<p style='font-size: 0.9em; color: #a0a0a0; margin-bottom: 5px;'>📱 スマホで表が横にはみ出す場合は、以下のメニューから不要な列を非表示（×）にできます。</p>", unsafe_allow_html=True)
+        
+        # 表示/非表示を選択するためのマルチセレクトを追加
+        all_columns = ["シグナル", "セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "資金の波及度 (%)"]
+        
+        selected_columns = st.multiselect(
+            "表示する列",
+            options=all_columns,
+            default=all_columns,
+            help="選択を外すとその列が表から隠れます。横幅を節約したい時にお使いください。"
+        )
+        
+        if not selected_columns:
+            selected_columns = ["セクター", "モメンタムスコア"] # すべて消した場合のフェイルセーフ
+            
+        # 選択されたカラムだけでデータフレームを絞り込む
+        filtered_df = display_df[selected_columns]
+
         # Pandas Styler機能を用いたヒートマップ（背景色）の適用
         def style_dataframe(v):
             return None # dummy
@@ -601,8 +620,11 @@ def render():
             return ''
 
         # スタイルの適用
-        styled_df = display_df.style.applymap(highlight_volume, subset=["出来高倍率 (x)"]) \
-                                    .applymap(highlight_ppo, subset=["25MA乖離率 (%)"])
+        styled_df = filtered_df.style
+        if "出来高倍率 (x)" in selected_columns:
+            styled_df = styled_df.applymap(highlight_volume, subset=["出来高倍率 (x)"])
+        if "25MA乖離率 (%)" in selected_columns:
+            styled_df = styled_df.applymap(highlight_ppo, subset=["25MA乖離率 (%)"])
         
         # 2. Streamlit `column_config` を用いたリッチUI化
         st.dataframe(
