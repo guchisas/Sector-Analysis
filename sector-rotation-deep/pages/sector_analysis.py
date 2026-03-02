@@ -153,6 +153,17 @@ def render():
         )
         st.plotly_chart(fig_tm, use_container_width=True)
         
+        # --- その他の全銘柄一覧（2段階目）をツリーマップ直下へ移動 ---
+        if all_stocks:
+            other_stocks = [s for s in all_stocks if s["sector"] == selected_sector and s["ticker"] not in sector_stocks["ticker"].values]
+            if other_stocks:
+                st.markdown("<br>", unsafe_allow_html=True)
+                with st.expander(f"🔽 同じセクター（{selected_sector}）のその他の銘柄 ({len(other_stocks)}件) を表示", expanded=False):
+                    st.caption(f"主要銘柄以外で、{selected_sector}に属するスタンダードやグロースなどの全ての銘柄が含まれます。")
+                    other_df = pd.DataFrame(other_stocks)[["ticker", "name", "market"]]
+                    other_df.columns = ["銘柄コード", "銘柄名", "上場市場"]
+                    st.dataframe(other_df, hide_index=True, use_container_width=True)
+                    
         st.markdown("<hr style='border:none; border-top:1px dashed #333; margin: 20px 0;'>", unsafe_allow_html=True)
         
         # --- 銘柄カード一覧 ---
@@ -181,17 +192,6 @@ def render():
                 ),
                 unsafe_allow_html=True,
             )
-
-        # --- その他の全銘柄一覧（2段階目） ---
-        if all_stocks:
-            other_stocks = [s for s in all_stocks if s["sector"] == selected_sector and s["ticker"] not in sector_stocks["ticker"].values]
-            if other_stocks:
-                st.markdown("<br>", unsafe_allow_html=True)
-                with st.expander(f"🔽 その他の全上場銘柄 ({len(other_stocks)}件) を表示", expanded=False):
-                    st.caption("上記以外のスタンダードやグロースなど、すべての銘柄が含まれます。")
-                    other_df = pd.DataFrame(other_stocks)[["ticker", "name", "market"]]
-                    other_df.columns = ["銘柄コード", "銘柄名", "上場市場"]
-                    st.dataframe(other_df, hide_index=True, use_container_width=True)
 
     # ==========================================
     # タブ2: お宝出遅れ銘柄発掘

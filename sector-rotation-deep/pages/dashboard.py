@@ -686,7 +686,12 @@ def render():
         
         col_sel, col_btn = st.columns([3, 1])
         with col_sel:
-            target_sector = st.selectbox("分析するセクターを選択", display_df["セクター"].tolist(), label_visibility="collapsed")
+            # ランキング順位を付与して探しやすくする
+            sector_list = display_df["セクター"].tolist()
+            options = [f"{i+1}位: {sec}" for i, sec in enumerate(sector_list)]
+            selected_option = st.selectbox("分析するセクターを選択", options, label_visibility="collapsed")
+            target_sector = selected_option.split(": ")[1] if ": " in selected_option else selected_option
+            
         with col_btn:
             if st.button("▶ 詳細分析へ", use_container_width=True, type="primary"):
                 st.query_params["sector"] = target_sector
