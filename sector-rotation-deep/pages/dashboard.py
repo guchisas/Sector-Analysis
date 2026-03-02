@@ -172,9 +172,13 @@ def render():
     # ※ページ更新時に最新データを表示できるよう、キャッシュ期間（TTL）を3600秒から60秒に短縮しました。
     @st.cache_data(ttl=60, show_spinner="📡 主要指数を取得中...")
     def _cached_market_overview():
-        return fetch_market_overview()
+        from datetime import datetime, timezone, timedelta
+        jst = timezone(timedelta(hours=9))
+        dt_str = datetime.now(jst).strftime("%H:%M")
+        return fetch_market_overview(), dt_str
 
-    market_data = _cached_market_overview()
+    market_data, market_fetch_time = _cached_market_overview()
+    st.caption(f"🕖 **データ取得時刻:** 本日 {market_fetch_time} (※約1分間隔で自動更新されます)")
 
     # --- HTMLカード（閉じた状態のサマリー）+ Expander内にミニチャート ---
     st.markdown(render_market_panel_html(market_data), unsafe_allow_html=True)
@@ -574,28 +578,32 @@ def render():
         display_df['Signal'] = display_df.apply(get_signal, axis=1)
             
         display_df = display_df[["Signal", "sector", "representative_stocks", "momentum_score", "avg_percent_change", "avg_volume_ratio", "avg_ppo", "up_down_ratio"]]
-        display_df.columns = ["シグナル", "セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "資金の波及度 (%)"]
+        display_df.columns = ["シグナル", "セクター", "代表銘柄", "資金流入スコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "資金の波及度 (%)"]
         
-        # モメンタムスコアで降順
-        display_df = display_df.sort_values("モメンタムスコア", ascending=False)
+        # 資金流入スコアで降順
+        display_df = display_df.sort_values("資金流入スコア", ascending=False)
         
-        st.markdown("<p style='font-size: 0.9em; color: #a0a0a0; margin-bottom: 5px;'>📱 スマホで表が横にはみ出す場合は、以下のメニューから不要な列を非表示（×）にできます。</p>", unsafe_allow_html=True)
-        
-        # 表示/非表示を選択するためのマルチセレクトを追加
-        all_columns = ["シグナル", "セクター", "代表銘柄", "モメンタムスコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "資金の波及度 (%)"]
-        
-        selected_columns = st.multiselect(
-            "表示する列",
-            options=all_columns,
-            default=all_columns,
-            help="選択を外すとその列が表から隠れます。横幅を節約したい時にお使いください。"
-        )
-        
+        with st.expander("⚙️ 表示する列のカスタマイズ（スマホ用）", expanded=False):
+            st.markdown("<p style='font-size: 0.9em; color: #b0b0b0; margin-bottom: 5px;'>スマホで表が横にはみ出す場合は、以下のメニューから不要な列を非表示（×）にできます。</p>", unsafe_allow_html=True)
+            
+            # 表示/非表示を選択するためのマルチセレクトを追加
+            all_columns = ["シグナル", "セクター", "代表銘柄", "資金流入スコア", "騰落率 (%)", "出来高倍率 (x)", "25MA乖離率 (%)", "資金の波及度 (%)"]
+            
+            selected_columns = st.multiselect(
+                "表示する列",
+                options=all_columns,
+                default=all_columns,
+                help="選択を外すとその列が表から隠れます。横幅を節約したい時にお使いください。"
+            )
+            
         if not selected_columns:
-            selected_columns = ["セクター", "モメンタムスコア"] # すべて消した場合のフェイルセーフ
+            selected_columns = ["セクター", "資金流入スコア"] # すべて消した場合のフェイルセーフ
+            
+        # ★重要: 順番を元の all_columns の並びに強制する（これがないと、選択した順に列が並んでしまう）
+        ordered_selected_columns = [col for col in all_columns if col in selected_columns]
             
         # 選択されたカラムだけでデータフレームを絞り込む
-        filtered_df = display_df[selected_columns]
+        filtered_df = display_df[ordered_selected_columns]
 
         # Pandas Styler機能を用いたヒートマップ（背景色）の適用
         def style_dataframe(v):
@@ -639,7 +647,7 @@ def render():
                     width="medium",
                     help="セクターを代表する主な上場企業"
                 ),
-                "モメンタムスコア": st.column_config.ProgressColumn(
+                "資金流入スコア": st.column_config.ProgressColumn(
                     "資金流入スコア", 
                     help="4つの指標を加重平均した総合的な資金流入の強さ（0〜100点）。高いほど機関投資家の資金流入が強い。",
                     format="%f",
@@ -671,6 +679,19 @@ def render():
             },
             height=600
         )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div style='background:rgba(76,155,232,0.1); padding:15px; border-radius:8px; border-left:4px solid #4C9BE8; margin-bottom:20px;'>", unsafe_allow_html=True)
+        st.markdown("**🔍 特定のセクターをさらに深掘りする**<br><span style='font-size:0.85rem; color:#ccc;'>「セクター分析」ページに移動して、構成銘柄のリストや出遅れ銘柄を確認できます。</span>", unsafe_allow_html=True)
+        
+        col_sel, col_btn = st.columns([3, 1])
+        with col_sel:
+            target_sector = st.selectbox("分析するセクターを選択", display_df["セクター"].tolist(), label_visibility="collapsed")
+        with col_btn:
+            if st.button("▶ 詳細分析へ", use_container_width=True, type="primary"):
+                st.query_params["sector"] = target_sector
+                st.switch_page("pages/sector_analysis.py")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ===== 出来高急増 TOP20 =====
     st.markdown(section_header("出来高急増銘柄 TOP20", "🚀"), unsafe_allow_html=True)

@@ -33,6 +33,12 @@ OUTPUT_PATH = os.path.join(PROJECT_ROOT, "utils", "constants.py")
 BATCH_SIZE = 50
 TOP_N = 600
 
+# 全銘柄用CSVの出力先
+FULL_CSV_PATH = os.path.join(PROJECT_ROOT, "data", "jpx_all_stocks.csv")
+
+# 全対象市場
+ALL_MARKETS = ["プライム（内国株式）", "スタンダード（内国株式）", "グロース（内国株式）"]
+
 
 def download_jpx_list() -> pd.DataFrame:
     """JPXから上場銘柄一覧をダウンロードする"""
@@ -219,20 +225,13 @@ def main():
         print("❌ JPXデータを取得できません。処理を終了します。")
         return
 
-    # 2. プライム・スタンダード市場をフィルタリング
-    filtered = filter_target_markets(jpx_df)
-
-    if filtered.empty:
-        print("❌ フィルタリング結果が空です。")
-        return
-
-    # 3. ティッカーシンボルを生成
-    # 実際のJPX Excelカラム名: 'コード', '銘柄名', '33業種区分'
+    # 2. 市場などのカラム名特定
     code_col = None
     name_col = None
     sector_col = None
+    market_col = None
 
-    for col in filtered.columns:
+    for col in jpx_df.columns:
         col_str = str(col).strip()
         if col_str == "コード" and code_col is None:
             code_col = col
@@ -240,12 +239,43 @@ def main():
             name_col = col
         elif col_str == "33業種区分" and sector_col is None:
             sector_col = col
+        elif ("市場" in col_str or "上場" in col_str) and market_col is None:
+            market_col = col
 
     if code_col is None:
-        print("❌ 銘柄コードカラムが見つかりません")
+        print("❌ 銘柄コードカラムが見つかりません。処理を終了します。")
         return
 
-    # ティッカー生成（4桁コード → XXXX.T 形式）
+    # 3. 全上場銘柄（グロース含む）のリストをCSV保存
+    print("\n📦 全上場銘柄リストの保存...")
+    all_markets_df = jpx_df[jpx_df[market_col].isin(ALL_MARKETS)] if market_col else jpx_df
+    if not all_markets_df.empty:
+        all_stocks_data = []
+        for _, row in all_markets_df.iterrows():
+            try:
+                code = str(int(row[code_col]))
+                ticker = f"{code}.T"
+                name = str(row[name_col]) if name_col else ""
+                sector = str(row[sector_col]) if sector_col else "不明"
+                # "プライム（内国株式）" -> "プライム" のように整形
+                market = str(row[market_col]).replace("（内国株式）", "") if market_col else "不明"
+                all_stocks_data.append({"ticker": ticker, "name": name, "sector": sector, "market": market})
+            except (ValueError, TypeError):
+                pass
+        
+        all_df = pd.DataFrame(all_stocks_data)
+        os.makedirs(os.path.dirname(FULL_CSV_PATH), exist_ok=True)
+        all_df.to_csv(FULL_CSV_PATH, index=False, encoding="utf-8-sig")
+        print(f"✅ 全銘柄リスト {len(all_df)} 件を {FULL_CSV_PATH} に保存しました。")
+    
+    # 4. トップ600銘柄用のフィルタリング (Prime, Standard)
+    filtered = filter_target_markets(jpx_df)
+
+    if filtered.empty:
+        print("❌ プライム・スタンダードのフィルタリング結果が空です。")
+        return
+
+    # 5. ティッカーシンボルを生成
     tickers_info = []
     for _, row in filtered.iterrows():
         try:
@@ -259,11 +289,11 @@ def main():
 
     print(f"\n📋 対象銘柄: {len(tickers_info)} 件")
 
-    # 4. 売買代金を取得
+    # 6. 売買代金を取得
     tickers = [t for t, _, _ in tickers_info]
     trading_values = get_trading_values(tickers)
 
-    # 5. 売買代金でソートし上位600を抽出
+    # 7. 売買代金でソートし上位600を抽出
     ticker_info_map = {t: (n, s) for t, n, s in tickers_info}
     ranked = sorted(trading_values.items(), key=lambda x: x[1], reverse=True)
     top_stocks = []
@@ -273,7 +303,7 @@ def main():
 
     print(f"\n🏆 売買代金上位 {len(top_stocks)} 銘柄を選出")
 
-    # 6. constants.py に書き込み
+    # 8. constants.py に書き込み
     generate_constants_py(top_stocks)
 
     print("\n✅ 完了！")

@@ -183,3 +183,41 @@ def fetch_with_streamlit_progress(
     status_text.empty()
 
     return result
+
+
+def fetch_fundamentals(tickers: list[str]) -> list[dict]:
+    """
+    指定したティッカーリストのファンダメンタルズ（PER, PBR, 時価総額）を取得する
+    YFinanceのinfo属性を使用するため、取得にはある程度時間がかかる点に注意。
+    
+    Returns:
+        [{"ticker": "...", "name": "...", "sector": "...", "per": 10.5, "pbr": 1.2, "market_cap": 10000000, "updated_at": "..."}]
+    """
+    results = []
+    
+    for ticker in tickers:
+        try:
+            info = yf.Ticker(ticker).info
+            
+            per = info.get('trailingPE')
+            if per is None:
+                per = info.get('forwardPE')
+                
+            pbr = info.get('priceToBook')
+            market_cap = info.get('marketCap')
+            
+            # 最低限のデータが取得できた場合のみリストに追加
+            if per is not None or pbr is not None or market_cap is not None:
+                results.append({
+                    "ticker": ticker,
+                    "name": info.get("longName", ""),
+                    "sector": info.get("sector", ""),
+                    "per": float(per) if per is not None else None,
+                    "pbr": float(pbr) if pbr is not None else None,
+                    "market_cap": float(market_cap) if market_cap is not None else None,
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+        except Exception:
+            pass
+            
+    return results

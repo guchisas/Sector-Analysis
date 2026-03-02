@@ -59,6 +59,19 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # stock_fundamentalsテーブル作成
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stock_fundamentals (
+            ticker TEXT PRIMARY KEY,
+            name TEXT,
+            sector TEXT,
+            per REAL,
+            pbr REAL,
+            market_cap REAL,
+            updated_at TEXT
+        )
+    """)
+
     # パフォーマンス最適化: Indexの作成
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_market_data_date
@@ -99,6 +112,51 @@ def upsert_market_data(records: list[dict]):
 
     conn.commit()
     conn.close()
+
+
+def upsert_fundamentals(records: list[dict]):
+    """
+    ファンダメンタルズデータをUpsertする
+    records: [{"ticker": "7203.T", "name": "トヨタ", "sector": "...", "per": 10.0, "pbr": 1.0, "market_cap": 1000000000, "updated_at": "2023-10-01 10:00:00"}, ...]
+    """
+    if not records:
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.executemany("""
+        INSERT OR REPLACE INTO stock_fundamentals
+        (ticker, name, sector, per, pbr, market_cap, updated_at)
+        VALUES
+        (:ticker, :name, :sector, :per, :pbr, :market_cap, :updated_at)
+    """, records)
+
+    conn.commit()
+    conn.close()
+
+
+def get_fundamentals(tickers: list[str]) -> pd.DataFrame:
+    """指定されたティッカーリストのファンダメンタルズを取得する"""
+    if not tickers:
+        return pd.DataFrame()
+
+    conn = get_connection()
+    placeholders = ",".join(["?"] * len(tickers))
+    df = pd.read_sql_query(
+        f"SELECT * FROM stock_fundamentals WHERE ticker IN ({placeholders})",
+        conn, params=tickers
+    )
+    conn.close()
+    return df
+
+
+def get_all_fundamentals() -> pd.DataFrame:
+    """DBに保存されている全てのファンダメンタルズを取得する"""
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM stock_fundamentals", conn)
+    conn.close()
+    return df
 
 
 def get_latest_date() -> str | None:
