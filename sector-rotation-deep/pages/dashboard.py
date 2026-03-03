@@ -694,7 +694,8 @@ def render():
             
         with col_btn:
             if st.button("▶ 詳細分析へ", use_container_width=True, type="primary"):
-                st.query_params["sector"] = target_sector
+                # st.switch_page は query_params を消してしまうため、session_state を経由して伝達する
+                st.session_state["target_sector"] = target_sector
                 st.switch_page("pages/sector_analysis.py")
         st.markdown("</div>", unsafe_allow_html=True)
 

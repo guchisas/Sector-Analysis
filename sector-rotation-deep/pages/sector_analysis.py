@@ -46,16 +46,39 @@ def render():
     st.markdown(f"**分析日: {latest_date}**")
 
     # 画面上部でのセクター選択（URLパラメータ対応）
-    available_sectors = sorted(sector_summary["sector"].unique().tolist())
+    from modules.momentum_calculator import calculate_sector_momentum
+    momentum_df = calculate_sector_momentum(latest_date)
+    if not momentum_df.empty:
+        # 資金流入スコア（momentum_score）の降順でランキング
+        momentum_df = momentum_df.sort_values("momentum_score", ascending=False)
+        ranked_sectors = momentum_df["sector"].tolist()
+        # 最新データにない古いセクターがある場合のフォールバック
+        available_sectors = ranked_sectors + [s for s in sector_summary["sector"].unique() if s not in ranked_sectors]
+    else:
+        available_sectors = sorted(sector_summary["sector"].unique().tolist())
     
-    # URLパラメータから初期セクターを取得
+    # 遷移時のセクター受け取り（ダッシュボードからのジャンプ用）
     initial_sector = available_sectors[0]
-    try:
-        query_params = st.query_params
-        if "sector" in query_params and query_params["sector"] in available_sectors:
-            initial_sector = query_params["sector"]
-    except Exception:
-        pass
+    
+    # 1. まずは session_state を優先してチェック
+    if "target_sector" in st.session_state:
+        if st.session_state["target_sector"] in available_sectors:
+            initial_sector = st.session_state["target_sector"]
+        # 使用後は削除
+        del st.session_state["target_sector"]
+        # URLも整合性を合わせる
+        try:
+            st.query_params["sector"] = initial_sector
+        except Exception:
+            pass
+    else:
+        # 2. 次に URLパラメータ をチェック
+        try:
+            query_params = st.query_params
+            if "sector" in query_params and query_params["sector"] in available_sectors:
+                initial_sector = query_params["sector"]
+        except Exception:
+            pass
         
     initial_index = available_sectors.index(initial_sector) if initial_sector in available_sectors else 0
 
@@ -77,12 +100,19 @@ def render():
                         st.rerun()
 
     st.markdown("### 🎯 セクターを選択")
-    selected_sector = st.selectbox(
+    
+    # プルダウンの選択肢に順位を付与する
+    options_with_rank = [f"{i+1}位: {sec}" for i, sec in enumerate(available_sectors)]
+    
+    selected_option = st.selectbox(
         "詳細を見るセクターを選んでください",
-        available_sectors,
+        options_with_rank,
         index=initial_index,
         label_visibility="collapsed"
     )
+    
+    # "1位: 機械" -> "機械" のように抽出
+    selected_sector = selected_option.split(": ")[1] if ": " in selected_option else selected_option
     
     # URLパラメータの更新（他のページから戻ってきた時等のために。Streamlit仕様にあわせて）
     try:

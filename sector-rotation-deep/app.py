@@ -39,7 +39,7 @@ with st.sidebar:
     # ナビゲーション
     page = st.radio(
         "ページ選択",
-        ["🏠 ダッシュボード", "📊 セクター分析", "📋 銘柄チャート", "🤖 AIインサイト", "📰 ニュースフィード", "📘 運用ガイド"],
+        ["🏠 ダッシュボード", "📊 セクター分析", "📋 銘柄チャート", "🎯 四季報スナイパー", "🤖 AIインサイト", "📰 ニュースフィード", "📘 運用ガイド"],
         label_visibility="collapsed",
     )
 
@@ -56,6 +56,9 @@ elif page == "📊 セクター分析":
 elif page == "📋 銘柄チャート":
     from pages import stock_chart
     stock_chart.render()
+elif page == "🎯 四季報スナイパー":
+    from pages import shikiho_edge
+    shikiho_edge.render()
 elif page == "🤖 AIインサイト":
     from pages import deep_insights
     deep_insights.render()

@@ -124,3 +124,134 @@ def get_latest_indicators(df: pd.DataFrame) -> dict:
         "volume_ratio": round(float(last_row.get("volume_ratio", 0)), 2) if pd.notna(last_row.get("volume_ratio")) else None,
         "percent_change": round(float(percent_change), 2),
     }
+
+# =========================================================================
+# 四季報スナイパー・ダッシュボード専用: 高度なシグナル計算ロジック
+# =========================================================================
+
+def _calculate_rvol(volume: int, avg_volume_20d: float, is_market_open: bool = False, elapsed_minutes: int = 0) -> float:
+    """
+    RVOL (予測出来高倍率) を計算する。
+    - 市場稼働中: 経過時間を考慮して本日の最終的な出来高を予測した上での倍率
+    - 市場終了後/休場: 本日の確定出来高と過去20日平均の倍率
+    """
+    if avg_volume_20d <= 0:
+        return 0.0
+        
+    if is_market_open and elapsed_minutes > 0:
+        # 東京証券取引所の営業時間は通常 9:00-11:30、12:30-15:00 の合計300分
+        # ただし昼休みを跨ぐ特殊な処理が必要になるため、簡易的に総取引時間を300分として算出
+        market_total_minutes = 300
+        # 経過時間が300分を超えている（引け後）場合は確定値として扱う
+        if elapsed_minutes >= market_total_minutes:
+            predicted_volume = volume
+        else:
+            predicted_volume = volume * (market_total_minutes / elapsed_minutes)
+        return float(predicted_volume / avg_volume_20d)
+    else:
+        return float(volume / avg_volume_20d)
+
+def _calculate_rr_ratio(current_price: float, min_60d: float, max_60d: float, sma75: float) -> float:
+    """
+    R:R (リスクリワード) を計算する
+    [ (直近60日の最高値 または 75SMA のうち低い方) - 現在値 ] / [ 現在値 - 直近60日の最安値 ]
+    """
+    if current_price <= min_60d:
+        return 99.9  # リスクがほぼ無い（底値）状態の便宜上の最大値
+        
+    target_high = min(max_60d, sma75) if pd.notna(sma75) and sma75 > 0 else max_60d
+    reward = target_high - current_price
+    risk = current_price - min_60d
+    
+    if risk <= 0:
+        return 99.9
+        
+    return float(reward / risk)
+
+def calculate_advanced_signals(df: pd.DataFrame, is_market_open: bool = False, elapsed_minutes: int = 0) -> dict:
+    """
+    四季報トップ50専用のシグナル判定を行う
+    
+    Args:
+        df: 日付でソート済みのDataFrame (最低60日分のデータが必要)
+    Returns:
+        シグナル情報を含む辞書
+    """
+    if df.empty or len(df) < 20: # 過去20日平均が取れない場合は空
+        return {}
+        
+    # 基本のテクニカル指標を計算
+    calc_df = calculate_all_indicators(df)
+    current = calc_df.iloc[-1]
+    
+    # 過去データから必要な数値を抽出
+    last_60d = calc_df.tail(60)
+    last_20d = calc_df.tail(20) # 昨日は含めないため正しくは tail(21).head(20) だが近似
+    last_3d = calc_df.tail(3)
+    
+    # 当日を除いた過去20日平均出来高
+    if len(calc_df) >= 21:
+        avg_vol_20d = calc_df["Volume"].iloc[-21:-1].mean()
+    else:
+        avg_vol_20d = calc_df["Volume"].iloc[:-1].mean()
+        
+    # 当日を除いた過去3日平均出来高（売り枯れ判定用）
+    if len(calc_df) >= 4:
+        avg_vol_3d = calc_df["Volume"].iloc[-4:-1].mean()
+    else:
+        avg_vol_3d = avg_vol_20d
+
+    min_60d = last_60d["Low"].min()
+    max_60d = last_60d["High"].max()
+    
+    current_price = current["Close"]
+    sma25 = current["sma25"]
+    sma75 = current["sma75"]
+    rsi = current["rsi"]
+    volume = current["Volume"]
+    
+    # 前日比
+    prev_close = calc_df["Close"].iloc[-2]
+    percent_change = ((current_price - prev_close) / prev_close) * 100
+    
+    # RVOL & R:R 計算
+    rvol = _calculate_rvol(volume, avg_vol_20d, is_market_open, elapsed_minutes)
+    rr_ratio = _calculate_rr_ratio(current_price, min_60d, max_60d, sma75)
+    
+    # ---------------------------------------------------------
+    # シグナル判定ロジック
+    # ---------------------------------------------------------
+    signal_type = "観察継続" # デフォルト
+    signal_icon = "👀"
+    signal_priority = 2 # 優先順位: 0=極上押し目, 1=資金流入初動, 2=観察継続, 3=監視外
+    
+    # ⚠️ 監視外（落ちるナイフの強制ブロック）
+    if current_price < sma25 and sma25 < sma75:
+        signal_type = "監視外"
+        signal_icon = "⚠️"
+        signal_priority = 3
+    else:
+        # 💎 極上押し目（反発狙い）
+        if pd.notna(rsi) and rsi <= 35:
+            # 売り枯れ確認（直近3日の平均出来高が20日平均を下回る）
+            if avg_vol_3d < avg_vol_20d:
+                signal_type = "極上押し目"
+                signal_icon = "💎"
+                signal_priority = 0
+                
+        # 🔥 資金流入初動（モメンタム・ブレイク）
+        elif rvol >= 2.0 and pd.notna(rsi) and rsi < 70 and percent_change > 0:
+            signal_type = "資金流入初動"
+            signal_icon = "🔥"
+            signal_priority = 1
+
+    return {
+        "price": float(current_price),
+        "percent_change": round(float(percent_change), 2),
+        "rsi": round(float(rsi), 1) if pd.notna(rsi) else None,
+        "rvol": round(float(rvol), 2),
+        "rr_ratio": round(float(rr_ratio), 2),
+        "signal_type": signal_type,
+        "signal_icon": signal_icon,
+        "signal_priority": signal_priority
+    }

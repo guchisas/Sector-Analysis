@@ -72,6 +72,19 @@ def init_db():
         )
     """)
 
+    # shikiho_fundamentalsテーブル作成（四季報・最強銘柄スナイパー用）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shikiho_fundamentals (
+            code TEXT PRIMARY KEY,
+            name TEXT,
+            sales_growth REAL,
+            op_profit_growth REAL,
+            op_profit_margin REAL,
+            reason TEXT,
+            csv_updated_at TEXT
+        )
+    """)
+
     # パフォーマンス最適化: Indexの作成
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_market_data_date
@@ -155,6 +168,111 @@ def get_all_fundamentals() -> pd.DataFrame:
     """DBに保存されている全てのファンダメンタルズを取得する"""
     conn = get_connection()
     df = pd.read_sql_query("SELECT * FROM stock_fundamentals", conn)
+    conn.close()
+    return df
+
+# =========================================================================
+# 四季報・最強銘柄スナイパー用メソッド
+# =========================================================================
+
+def import_shikiho_csv(csv_path: str) -> bool:
+    """
+    四季報トップ50のCSVを読み込み、正規表現で動的にカラムを特定して
+    shikiho_fundamentalsテーブルへUpsertする。
+    """
+    if not os.path.exists(csv_path):
+        print(f"⚠️ 四季報CSVが見つかりません: {csv_path}")
+        return False
+        
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        print(f"⚠️ 四季報CSVの読み込みに失敗: {e}")
+        return False
+        
+    # 動的カラム解決
+    cols = df.columns.tolist()
+    
+    code_col = next((c for c in cols if "コード" in c), None)
+    name_col = next((c for c in cols if "銘柄名" in c or "名称" in c), None)
+    sales_col = next((c for c in cols if "売上成長率" in c), None)
+    op_grown_col = next((c for c in cols if "営業益成長率" in c or "営業利益成長率" in c), None)
+    op_margin_col = next((c for c in cols if "営業利益率" in c), None)
+    reason_col = next((c for c in cols if "選定理由" in c or "強み" in c), None)
+    
+    if not code_col or not reason_col:
+        print("⚠️ 必須カラム（コード、選定理由）が見つかりません。")
+        return False
+        
+    # クリーニング用関数
+    def clean_pct(val):
+        if pd.isna(val) or val == "" or str(val).strip() == "":
+            return None
+        s = str(val).replace("%", "").replace("+", "").replace(",", "").strip()
+        try:
+            return float(s)
+        except ValueError:
+            return None
+            
+    # レコード作成
+    # CSVファイルの更新日時を取得
+    import time
+    file_mtime = os.path.getmtime(csv_path)
+    updated_at = datetime.fromtimestamp(file_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    
+    records = []
+    for _, row in df.iterrows():
+        code_val = row.get(code_col)
+        # 空行や"順位"がNaNの行をスキップ
+        if pd.isna(code_val) or str(code_val).strip() == "":
+            continue
+            
+        str_code = str(code_val).strip()
+        # "1234.0" のようになっている場合は ".0" を削る
+        if str_code.endswith(".0"):
+            str_code = str_code[:-2]
+        
+        code = str_code + ".T" # yfinance用の.T付与
+        name = str(row.get(name_col, ""))
+        reason = str(row.get(reason_col, ""))
+        
+        sales_growth = clean_pct(row.get(sales_col))
+        op_profit_growth = clean_pct(row.get(op_grown_col))
+        op_profit_margin = clean_pct(row.get(op_margin_col))
+        
+        records.append({
+            "code": code,
+            "name": name,
+            "sales_growth": sales_growth,
+            "op_profit_growth": op_profit_growth,
+            "op_profit_margin": op_profit_margin,
+            "reason": reason,
+            "csv_updated_at": updated_at
+        })
+        
+    if not records:
+        print("⚠️ インポートできる有効なデータがありませんでした。")
+        return False
+        
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.executemany("""
+        INSERT OR REPLACE INTO shikiho_fundamentals
+        (code, name, sales_growth, op_profit_growth, op_profit_margin, reason, csv_updated_at)
+        VALUES
+        (:code, :name, :sales_growth, :op_profit_growth, :op_profit_margin, :reason, :csv_updated_at)
+    """, records)
+    
+    conn.commit()
+    conn.close()
+    print(f"✅ 四季報データ {len(records)}件 のインポートが完了しました。")
+    return True
+
+def get_shikiho_data() -> pd.DataFrame:
+    """DBから四季報ファンダメンタルズデータを取得する"""
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM shikiho_fundamentals", conn)
     conn.close()
     return df
 

@@ -105,6 +105,16 @@ def fetch_market_overview() -> Dict[str, dict]:
             # 前日比
             if len(close) >= 2:
                 prev_price = float(close.iloc[-2])
+                
+                # yfinanceのバグ（一部のアジア指数で前営業日データが抜ける問題）対策
+                # infoから正当な previousClose が取得できればそれを優先する
+                try:
+                    info_data = ticker.info
+                    if "previousClose" in info_data and info_data["previousClose"]:
+                        prev_price = float(info_data["previousClose"])
+                except Exception:
+                    pass
+                
                 change = latest_price - prev_price
                 change_pct = (change / prev_price) * 100
             else:
