@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, time
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -109,8 +109,7 @@ def render():
     oversold = get_oversold_stocks()
 
     # 最終更新情報をヘッダー下に表示
-    from datetime import timezone, timedelta as _td
-    _jst = timezone(_td(hours=9))
+    _jst = timezone(timedelta(hours=9))
     _db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sector_rotation.db")
     _db_mtime = os.path.getmtime(_db_path) if os.path.exists(_db_path) else 0
     if _db_mtime > 0:
@@ -154,11 +153,9 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
     
     # --- 時間帯判定とロジック分岐 ---
-    from datetime import datetime, timezone, timedelta
-    jst = timezone(timedelta(hours=9))
-    now_jst = datetime.now(jst)
+    _jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(_jst)
     now_time = now_jst.time()
-    from datetime import time
     
     # 15:31以降〜翌日08:59までは「明日の予報（次の営業日の予報）」とする
     is_forecast_tomorrow = now_time >= time(15, 31) or now_time < time(9, 0)
