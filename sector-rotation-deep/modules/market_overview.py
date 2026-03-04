@@ -39,6 +39,30 @@ MARKET_INDICES = {
         "icon": "💱",
         "format": "¥{:,.2f}",
     },
+    "sp500": {
+        "ticker": "^GSPC",
+        "name": "S&P 500",
+        "icon": "🇺🇸",
+        "format": "${:,.2f}",
+    },
+    "dow": {
+        "ticker": "^DJI",
+        "name": "NYダウ",
+        "icon": "🏭",
+        "format": "${:,.2f}",
+    },
+    "nasdaq": {
+        "ticker": "^IXIC",
+        "name": "NASDAQ",
+        "icon": "💻",
+        "format": "${:,.2f}",
+    },
+    "nikkei_futures": {
+        "ticker": "NIY=F", # CME Nikkei 225 Futures
+        "name": "日経先物",
+        "icon": "🌙",
+        "format": "¥{:,.0f}",
+    },
 }
 
 
@@ -174,7 +198,10 @@ def render_market_panel_html(market_data: Dict[str, dict]) -> str:
     """
     cards = []
 
-    for key in ["nikkei", "topix", "growth250", "usdjpy"]:
+    # 8つの指標を固定順でループ
+    keys = ["nikkei", "topix", "growth250", "nikkei_futures", "usdjpy", "dow", "nasdaq", "sp500"]
+
+    for key in keys:
         data = market_data.get(key, {})
 
         if data.get("price") is not None:

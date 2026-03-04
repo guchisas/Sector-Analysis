@@ -142,24 +142,62 @@ def render():
     </div>
     """, unsafe_allow_html=True)
 
-    # ===== 本日の相場天気予報（相場モード） =====
+    # ===== 本日の/明日の相場天気予報（相場モード） =====
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # --- 時間帯判定とロジック分岐 ---
+    from datetime import datetime
+    now_hour = datetime.now().hour
+    is_forecast_tomorrow = now_hour >= 15 or now_hour < 9  # 15:00〜翌08:59は「明日の予報」
+    
+    forecast_title = "明日の相場天気予報" if is_forecast_tomorrow else "本日の相場天気予報"
+    
     if not sector_summary.empty:
+        # 共通指標
         avg_up_ratio = sector_summary["up_down_ratio"].mean() * 100
         avg_ppo_total = sector_summary["avg_ppo"].mean()
         
-        if avg_up_ratio >= 60 and avg_ppo_total > 0:
-            weather_icon, weather_title, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", "市場全体に資金が流入しています。強いトレンドを持つトップセクターへの順張りが有効な地合いです。"
-        elif avg_up_ratio <= 40 and avg_ppo_total < 0:
-            weather_icon, weather_title, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", "市場全体から資金が流出しています。安易なナンピンは避け、底打ちからのリバウンド（逆張り）やディフェンシブ銘柄を狙う地合いです。"
-        else:
-            weather_icon, weather_title, weather_color, weather_desc = "☁️", "様子見（選別物色・もみ合い相場）", "#FFA500", "全体的な方向感が乏しい状態です。資金が一部のテーマや個別銘柄に集中する「循環物色」が起きやすい地合いです。"
+        # --- 日中のロジック（日経平均の動向を強く反映） ---
+        if not is_forecast_tomorrow:
+            # 日経平均の取得（急落時の直感ズレ防止用）
+            nikkei_change = market_data.get("nikkei", {}).get("change_pct", 0)
             
+            # 日経が -1.5% 以上の大幅下落時は問答無用で「全面安（リスクオフ）」とする
+            if nikkei_change <= -1.5:
+                weather_icon, weather_type, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", f"日経平均が大きく下落（{nikkei_change:.2f}%）し、市場全体から資金が抜けている状態です。安易なナンピンは避け、底打ちからのリバウンド（逆張り）やディフェンシブ銘柄を狙う地合いです。"
+            # 日経が +1.5% 以上の大幅上昇時
+            elif nikkei_change >= 1.5:
+                weather_icon, weather_type, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", f"日経平均が力強く上昇（+{nikkei_change:.2f}%）しています。強いトレンドを持つトップセクターへの順張りが極めて有効な地合いです。"
+            # それ以外は従来のセクター内訳に基づく判定
+            elif avg_up_ratio >= 60 and avg_ppo_total > 0:
+                weather_icon, weather_type, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", "市場全体に資金が流入しています。強いトレンドを持つトップセクターへの順張りが有効な地合いです。"
+            elif avg_up_ratio <= 40 and avg_ppo_total < 0:
+                weather_icon, weather_type, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", "市場全体から資金が流出しています。安易なナンピンは避け、底打ちからのリバウンド（逆張り）やディフェンシブ銘柄を狙う地合いです。"
+            else:
+                weather_icon, weather_type, weather_color, weather_desc = "☁️", "様子見（選別物色・もみ合い相場）", "#FFA500", "全体的な方向感が乏しい状態です。資金が一部のテーマや個別銘柄に集中する「循環物色」が起きやすい地合いです。"
+                
+        # --- 明日（夜間）のロジック（米国指標・先物の動向を反映） ---
+        else:
+            futures = market_data.get("nikkei_futures", {}).get("change_pct", 0)
+            us_avg = (market_data.get("sp500", {}).get("change_pct", 0) + 
+                      market_data.get("nasdaq", {}).get("change_pct", 0) + 
+                      market_data.get("dow", {}).get("change_pct", 0)) / 3.0
+            
+            # 先物と米国の総合評価
+            combined_score = futures * 0.6 + us_avg * 0.4
+            
+            if combined_score >= 0.5:
+                 weather_icon, weather_type, weather_color, weather_desc = "☀️", "反発・ギャップアップ期待", "#00D26A", "日経先物または米国市場が好調に推移しており、明日の日本株は高く寄り付く（ギャップアップ）公算が大きいです。"
+            elif combined_score <= -0.5:
+                 weather_icon, weather_type, weather_color, weather_desc = "☔", "軟調開け・警戒モード", "#FF4B4B", "日経先物または米国市場が下落しており、明日の日本株は低く寄り付く（ギャップダウン）リスクが高まっています。"
+            else:
+                 weather_icon, weather_type, weather_color, weather_desc = "☁️", "方向感薄・個別の物色", "#FFA500", "夜間の主要指数は大きな方向感を示していません。明日の日本市場は個別材料や特定のセクター内での循環物色が中心になりそうです。"
+
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, rgba(30,40,55,0.95) 0%, rgba(15,20,30,0.95) 100%); border-left: 5px solid {weather_color}; padding: 15px 20px; border-radius: 6px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-            <div style="font-size: 0.9rem; color: #a0a0a0; font-weight: 600; letter-spacing: 1px; margin-bottom: 5px;">本日の相場天気予報</div>
+            <div style="font-size: 0.9rem; color: #a0a0a0; font-weight: 600; letter-spacing: 1px; margin-bottom: 5px;">{forecast_title}</div>
             <div style="font-size: 1.6rem; font-weight: bold; color: {weather_color}; margin-bottom: 8px;">
-                {weather_icon} {weather_title}
+                {weather_icon} {weather_type}
             </div>
             <div style="font-size: 0.95rem; color: #d0d0d0; line-height: 1.5;">{weather_desc}</div>
         </div>
@@ -694,9 +732,11 @@ def render():
             
         with col_btn:
             if st.button("▶ 詳細分析へ", use_container_width=True, type="primary"):
-                # st.switch_page は query_params を消してしまうため、session_state を経由して伝達する
+                # Streamlitのnative multipage(ページURL遷移)とapp.pyのルーティングが衝突するのを防ぐため、
+                # st.switch_pageを使わずにセッションステートを書き換えてapp.pyから再描画させる
                 st.session_state["target_sector"] = target_sector
-                st.switch_page("pages/sector_analysis.py")
+                st.session_state["current_page"] = "📊 セクター分析"
+                st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ===== 出来高急増 TOP20 =====

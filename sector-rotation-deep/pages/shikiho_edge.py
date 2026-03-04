@@ -230,6 +230,7 @@ def render():
         color_discrete_map={
             "極上押し目": "#39ff14", # ネオングリーン
             "資金流入初動": "#ff4500", # オレンジレッド
+            "注目・打診候補": "#00BFFF", # ディープスカイブルー
             "観察継続": "#888888",
             "監視外": "#333333"
         },
@@ -241,6 +242,7 @@ def render():
             "rvol": True,
             "rr_ratio": True,
             "signal_type": True,
+            "signal_reason": True,
             "rvol_size": False,
         },
         title="RSI × 営業益成長率 (バブルサイズ: 予測出来高倍率 RVOL)",
@@ -260,7 +262,7 @@ def render():
     # R:Rと選定理由をホバーに押し込むのはPlotly Expressだと少し工夫が必要なため、
     # カスタムテンプレート（hovertemplate）で上書きする
     fig.update_traces(
-        hovertemplate="<b>%{hovertext}</b><br><br>RSI: %{x}<br>営業益成長率: %{y}%<br>RVOL: %{customdata[3]}<br>R:R: %{customdata[4]}<br>シグナル: %{customdata[5]}"
+        hovertemplate="<b>%{hovertext}</b><br><br>RSI: %{x}<br>営業益成長率: %{y}%<br>RVOL: %{customdata[3]}<br>R:R: %{customdata[4]}<br>シグナル: %{customdata[5]}<br>理由: %{customdata[6]}"
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -273,7 +275,7 @@ def render():
     display_df = display_df.sort_values(["signal_priority", "rr_ratio"], ascending=[True, False])
     
     # 必要なカラムに絞る
-    display_cols = ["signal_icon", "code", "name", "price", "percent_change", "rsi", "rvol", "rr_ratio", "op_profit_growth", "signal_type"]
+    display_cols = ["signal_icon", "code", "name", "price", "percent_change", "rsi", "rvol", "rr_ratio", "op_profit_growth", "signal_type", "signal_reason"]
     display_df = display_df[display_cols]
     
     # 列名リネーム
@@ -287,21 +289,35 @@ def render():
         "rvol": "RVOL",
         "rr_ratio": "R:R",
         "op_profit_growth": "営業益成長率(%)",
-        "signal_type": "シグナル"
+        "signal_type": "シグナル",
+        "signal_reason": "判定理由"
     })
     
-    # CSSスタイリングを通じた監視外のグレーアウト処理
+    # CSSスタイリングを通じた監視外のグレーアウトと少数点フォーマット処理
     def style_dataframe(row):
         if row["シグナル"] == "監視外":
-            return ["color: #555555; background-color: transparent;"] * len(row)
+            return ["color: #444444; background-color: transparent;"] * len(row)
         elif row["シグナル"] == "極上押し目":
             return ["background-color: rgba(57, 255, 20, 0.1);"] * len(row)
         elif row["シグナル"] == "資金流入初動":
             return ["background-color: rgba(255, 69, 0, 0.1);"] * len(row)
+        elif row["シグナル"] == "注目・打診候補":
+            return ["background-color: rgba(0, 191, 255, 0.1);"] * len(row)
         else:
             return [""] * len(row)
 
     styled_df = display_df.style.apply(style_dataframe, axis=1)
+    
+    # 数値フォーマットの適用（見やすく少数点を丸める）
+    format_dict = {
+        "現在値": "{:,.0f}",
+        "前日比(%)": "{:+.2f}",
+        "RSI": "{:.1f}",
+        "RVOL": "{:.2f}",
+        "R:R": "{:.2f}",
+        "営業益成長率(%)": "{:.1f}",
+    }
+    styled_df = styled_df.format(format_dict, na_rep="-")
     
     st.dataframe(
         styled_df,

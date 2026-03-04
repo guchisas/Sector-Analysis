@@ -9,7 +9,6 @@ yfinanceを使用した市場データ取得モジュール
 import time
 import yfinance as yf
 import pandas as pd
-import streamlit as st
 from datetime import datetime, timedelta
 
 
@@ -165,6 +164,7 @@ def fetch_with_streamlit_progress(
     """
     Streamlit UIに進捗バーを表示しながらデータを取得する
     """
+    import streamlit as st  # Streamlit依存の主要処理は選延インポートに
     progress_bar = st.progress(0)
     status_text = st.empty()
 

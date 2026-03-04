@@ -223,13 +223,15 @@ def calculate_advanced_signals(df: pd.DataFrame, is_market_open: bool = False, e
     # ---------------------------------------------------------
     signal_type = "観察継続" # デフォルト
     signal_icon = "👀"
-    signal_priority = 2 # 優先順位: 0=極上押し目, 1=資金流入初動, 2=観察継続, 3=監視外
+    signal_priority = 3 # 優先順位: 0=極上押し目, 1=資金流入初動, 2=注目・打診, 3=観察継続, 4=監視外
+    signal_reason = "シグナル点灯条件を満たしていないため待機中"
     
     # ⚠️ 監視外（落ちるナイフの強制ブロック）
     if current_price < sma25 and sma25 < sma75:
         signal_type = "監視外"
         signal_icon = "⚠️"
-        signal_priority = 3
+        signal_priority = 4
+        signal_reason = "現在値が中期・長期より下（ダウントレンド）のため"
     else:
         # 💎 極上押し目（反発狙い）
         if pd.notna(rsi) and rsi <= 35:
@@ -238,12 +240,22 @@ def calculate_advanced_signals(df: pd.DataFrame, is_market_open: bool = False, e
                 signal_type = "極上押し目"
                 signal_icon = "💎"
                 signal_priority = 0
+                signal_reason = "RSI 35以下 ＆ 出来高減少（売り枯れ）が見られるため"
                 
         # 🔥 資金流入初動（モメンタム・ブレイク）
         elif rvol >= 2.0 and pd.notna(rsi) and rsi < 70 and percent_change > 0:
             signal_type = "資金流入初動"
             signal_icon = "🔥"
             signal_priority = 1
+            signal_reason = f"出来高急増（{round(rvol, 1)}倍）＆ 株価の反発が見られるため"
+        
+        # 🌟 注目・打診候補（観察継続の中でも良好なもの）
+        elif pd.notna(rsi) and pd.notna(rr_ratio):
+            if rr_ratio >= 1.0 or rsi <= 45:
+                signal_type = "注目・打診候補"
+                signal_icon = "🌟"
+                signal_priority = 2
+                signal_reason = "リスクリワード良好（1.0以上）またはRSI 45以下で割安圏のため"
 
     return {
         "price": float(current_price),
@@ -253,5 +265,6 @@ def calculate_advanced_signals(df: pd.DataFrame, is_market_open: bool = False, e
         "rr_ratio": round(float(rr_ratio), 2),
         "signal_type": signal_type,
         "signal_icon": signal_icon,
-        "signal_priority": signal_priority
+        "signal_priority": signal_priority,
+        "signal_reason": signal_reason
     }

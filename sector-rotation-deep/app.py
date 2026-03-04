@@ -36,10 +36,14 @@ with st.sidebar:
     st.markdown("## 📈 セクター分析")
     st.markdown("---")
 
-    # ナビゲーション
+    # ナビゲーションの実装（st.switch_pageのバグ回避のためsession_state管理）
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "🏠 ダッシュボード"
+
     page = st.radio(
         "ページ選択",
         ["🏠 ダッシュボード", "📊 セクター分析", "📋 銘柄チャート", "🎯 四季報スナイパー", "🤖 AIインサイト", "📰 ニュースフィード", "📘 運用ガイド"],
+        key="current_page",
         label_visibility="collapsed",
     )
 

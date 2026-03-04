@@ -31,7 +31,7 @@ def _get_api_key() -> str | None:
 
 
 def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
-                  volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
+                  volume_surge_stocks: pd.DataFrame, news_text: str, market_overview: dict) -> str:
     """AI分析用のプロンプトを構築する"""
 
     # セクター騰落率テキスト
@@ -71,6 +71,17 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
     else:
         volume_text += "該当なし\n"
 
+    # --- マクロ指標テキスト ---
+    macro_text = "【主要マクロ指標（現在値・前日比）】\n"
+    if market_overview:
+        for key, data in market_overview.items():
+            name = data.get("name", key)
+            val = data.get("price", 0)
+            chg = data.get("change_pct", 0)
+            macro_text += f"- {name}: {val:,.2f} ({chg:+.2f}%)\n"
+    else:
+        macro_text += "データなし\n"
+
     # --- ▼ 最新の「辛口ストラテジスト」指示 ▼ ---
     prompt = f"""
 あなたは、ウォール街と兜町で20年以上の経験を持つ「辛口かつ論理的な株式ストラテジスト」です。
@@ -80,7 +91,10 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 単なる「値動きの実況（〜が上がりました）」は不要です。「なぜ動いたのか？」という**背景要因（ニュース、決算、要人発言、地政学リスク）**を特定し、論理的に説明してください。
 
 【入力データ】
-1. セクター分析データ（定量）:
+1. マクロ環境ダッシュボード（日経先物や米国指数を含む）:
+{macro_text}
+
+2. セクター分析データ（定量）:
 {sector_text}
 
 2. 注目銘柄データ（売られすぎ/出来高急増）:
@@ -94,7 +108,7 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 以下の構成で、HTML形式（Markdown）で出力してください。です・ます調ですが、プロらしく断定的なトーンで書いてください。
 
 ## 1. 📰 マーケット・ナラティブ（深層分析）
-* **市場のテーマ:** 現在、市場を支配しているメインテーマは何か？（例：「AIバブルの警戒感」「日銀の利上げ観測」など、ニュースから具体的な**固有名詞**を出して断定せよ）。また、そのテーマ（セクターの盛り上がり）が一時的なものか、あるいは構造的（継続的）なものかについても深く洞察して言及せよ。
+* **市場のテーマ:** 現在、市場を支配しているメインテーマは何か？（例：「AIバブルの警戒感」「日銀の利上げ観測」など、ニュースから具体的な**固有名詞**を出して断定せよ）。また、入力された「マクロ環境ダッシュボード」の値（日経先物や米国株など）から、現在の地合いや明日の日本株の寄り付きに向けたバイアス（ギャップアップ警戒など）を読み解いて組み込め。
 * **センチメント:** 投資家心理は「楽観」か「恐怖」か？それはどのニュース（例：アンソロピックの報道、米雇用統計など）に起因するか？
 * **ニュースとの結合:** 上記の定量データで特異な動きをしているセクターについて、ニュース記事内の出来事と因果関係を紐づけて解説せよ。
 
@@ -116,44 +130,48 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 
 def _execute_gemini_call(prompt: str, api_key: str) -> str:
     """
-    Gemini APIを呼び出す。
-    429制限や無駄なリクエストを避けるため、モデルの自動取得や不要なループ処理を削減。
+    Gemini REST API\u3092\u76f4\u63a5\u547c\u3073\u51fa\u3059\uff08grpcio\u4e0d\u8981\u306erequests\u4f7f\u7528\uff09
+    ARM64\u74b0\u5883\u3084\u30d3\u30eb\u30c9\u74b0\u5883\u3067\u3082\u52d5\u4f5c\u3059\u308b\u3088\u3046\u306bgrpc\u4f9d\u5b58\u975e\u5e38\u306b\u5b9f\u88c5\u3002
     """
-    import google.generativeai as genai
-    from google.api_core.exceptions import ResourceExhausted
+    import requests as _req
+    import json
 
-    genai.configure(api_key=api_key)
-    
-    # 決め打ちで高速かつ強力な最新モデルを使用（無駄な list_models リクエストを避ける）
-    # 画像の制限を見る限り、Gemini 2.5 Flash Lite もフォールバックとして追加する価値あり
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
-        
+    models_to_try = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"]
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+
     last_error = None
     for model_name in models_to_try:
+        url = f"{base_url}/{model_name}:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 8000}
+        }
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            if response.text:
-                return response.text
-        except ResourceExhausted as e:
-            # 429 Quota エラー（制限超過）の場合
-            last_error = (
-                "🚨 **APIの利用制限（429エラー: Quota Exceeded）に達しました。**\n\n"
-                "Google AI Studioの無料枠では、お使いのアカウント・地域によって **「1日20回まで (20 RPD)」** という非常に厳しい制限が設定されている場合があります。\n\n"
-                "**【解決策】**\n"
-                "Google AI Studioの設定（[Billing設定](https://aistudio.google.com/app/billing)）から**「従量課金（Pay-as-you-go）」**を有効にしてください。 "
-                "Gemini 1.5/2.0 Flashは非常に安価（1回数円未満）なので、個人利用の範囲であれば実質無料に近い金額で制限を大幅に解除できます。"
-            )
-            break
+            resp = _req.post(url, json=payload, timeout=120)
+            if resp.status_code == 429:
+                last_error = (
+                    "APIの利用制限（429: Quota Exceeded）に達しました。\n\n"
+                    "Google AI Studioの設定から「従量課金（Pay-as-you-go）」を有効にしてください。"
+                )
+                break
+            if resp.status_code == 404:
+                # このモデルが存在しない場合は次を試す
+                last_error = f"Model {model_name} not found (404)"
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            if text:
+                return text
         except Exception as e:
             last_error = str(e)
-            # 404など他のエラーの場合は次のモデル（フォールバック）を試す
             continue
-            
-    raise Exception(f"モデルの呼び出しに失敗しました。詳細: {last_error}")
+
+    raise Exception(f"Gemini API\u306e\u547c\u3073\u51fa\u3057\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002\u8a73\u7d30: {last_error}")
+
 
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
-                        volume_surge_stocks: pd.DataFrame, news_text: str) -> str:
+                        volume_surge_stocks: pd.DataFrame, news_text: str, market_overview: dict = None) -> str:
     """
     Gemini APIを使用してセクターローテーション分析を実行する
     APIキー未設定やエラー時はフォールバックサマリーを返す
@@ -164,7 +182,7 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
         return _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
 
     try:
-        prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text)
+        prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text, market_overview)
         return _execute_gemini_call(prompt, api_key)
 
     except Exception as e:
@@ -247,7 +265,11 @@ def get_shared_ai_insight(date_str: str, db_version: float):
         volume_surge = get_volume_surge_stocks(d_str)
         news_text = fetch_news_summary(max_articles=15)
         
-        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text)
+        # マクロ指標の取得（AI分析用）
+        from modules.market_overview import fetch_market_overview
+        market_overview = fetch_market_overview()
+        
+        result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text, market_overview)
         
         jst = timezone(timedelta(hours=9))
         return result, datetime.now(jst).strftime("%H:%M")
