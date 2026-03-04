@@ -1,2 +1,0 @@
-# Streamlit Community Cloud 用 OS レベル依存パッケージ
-# 現時点では追加パッケージ不要
