@@ -109,17 +109,14 @@ def render():
     oversold = get_oversold_stocks()
 
     # 最終更新情報をヘッダー下に表示
-    from modules.db_manager import get_db_last_modified
-    from datetime import timezone, timedelta as td
-    
-    db_mtime = get_db_last_modified()
-    jst = timezone(td(hours=9))
-    
-    if db_mtime > 0:
-        last_updated = datetime.fromtimestamp(db_mtime, jst)
+    from datetime import timezone, timedelta as _td
+    _jst = timezone(_td(hours=9))
+    _db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sector_rotation.db")
+    _db_mtime = os.path.getmtime(_db_path) if os.path.exists(_db_path) else 0
+    if _db_mtime > 0:
+        last_updated = datetime.fromtimestamp(_db_mtime, _jst)
     else:
-        last_updated = datetime.now(jst)
-        
+        last_updated = datetime.now(_jst)
     next_hour = f"{(last_updated.hour + 1) % 24:02d}:{last_updated.minute:02d}"
     st.caption(f"📅 データ: {latest_date} ｜ 🕐 最終更新: {last_updated.strftime('%H:%M')} (JST) ｜ 次回更新: {next_hour} 以降")
 

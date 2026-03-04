@@ -47,7 +47,9 @@ def render():
 
     # 画面上部でのセクター選択（URLパラメータ対応）
     from modules.momentum_calculator import calculate_sector_momentum_scores
-    momentum_df = calculate_sector_momentum_scores(latest_date)
+    from modules.db_manager import get_sector_history_stats
+    sector_history = get_sector_history_stats(days=20)
+    momentum_df = calculate_sector_momentum_scores(sector_summary, sector_history)
     if not momentum_df.empty:
         # 資金流入スコア（momentum_score）の降順でランキング
         momentum_df = momentum_df.sort_values("momentum_score", ascending=False)
