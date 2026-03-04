@@ -154,10 +154,23 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
     
     # --- 時間帯判定とロジック分岐 ---
-    now_hour = datetime.now().hour
-    is_forecast_tomorrow = now_hour >= 15 or now_hour < 9  # 15:00〜翌08:59は「明日の予報」
+    from datetime import datetime, timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(jst)
+    now_time = now_jst.time()
+    from datetime import time
     
-    forecast_title = "明日の相場天気予報" if is_forecast_tomorrow else "本日の相場天気予報"
+    # 15:31以降〜翌日08:59までは「明日の予報（次の営業日の予報）」とする
+    is_forecast_tomorrow = now_time >= time(15, 31) or now_time < time(9, 0)
+    
+    # タイトル用の日付を計算
+    if is_forecast_tomorrow:
+        # 15:31以降なら翌日、0時〜8時59分なら当日を「次の相場」とする
+        target_date = now_jst + timedelta(days=1) if now_time >= time(15, 31) else now_jst
+    else:
+        target_date = now_jst
+
+    forecast_title = f"{target_date.month}月{target_date.day}日の相場天気予報"
     
     if not sector_summary.empty:
         # 共通指標
