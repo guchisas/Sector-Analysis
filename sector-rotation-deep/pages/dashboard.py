@@ -173,42 +173,85 @@ def render():
         # 共通指標
         avg_up_ratio = sector_summary["up_down_ratio"].mean() * 100
         avg_ppo_total = sector_summary["avg_ppo"].mean()
+        # --- 天気予報判定用パラメータ ---
+        nikkei_data = market_data.get("nikkei", {})
+        nikkei_close = nikkei_data.get("price", 0)
+        nikkei_change = nikkei_data.get("change_pct", 0)
+        nikkei_rsi = nikkei_data.get("rsi", 50)
         
         # --- 日中のロジック（日経平均の動向を強く反映） ---
         if not is_forecast_tomorrow:
-            # 日経平均の取得（急落時の直感ズレ防止用）
-            nikkei_change = market_data.get("nikkei", {}).get("change_pct", 0)
-            
-            # 日経が -1.5% 以上の大幅下落時は問答無用で「全面安（リスクオフ）」とする
+            # 日経が -1.5% 以上の大幅下落時は「セリクラまたは全面安」
             if nikkei_change <= -1.5:
-                weather_icon, weather_type, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", f"日経平均が大きく下落（{nikkei_change:.2f}%）し、市場全体から資金が抜けている状態です。安易なナンピンは避け、底打ちからのリバウンド（逆張り）やディフェンシブ銘柄を狙う地合いです。"
+                if nikkei_rsi <= 30:
+                    weather_icon, weather_type, weather_color, weather_desc = "⛈️", "底打ち反発期待（セリクラ）", "#4C9BE8", f"日経平均が大きく沈んでいますが（{nikkei_change:.2f}%）、市場は総悲観（RSI: {nikkei_rsi:.1f}）で売られすぎ水準にあります。売り一巡後からの強いリバウンドに期待できる地合いです。"
+                else:
+                    weather_icon, weather_type, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", f"日経平均が大きく下落（{nikkei_change:.2f}%）し、市場全体から資金が抜けています。安易なナンピンは避け、ディフェンシブ銘柄へ資金を避難させる地合いです。"
             # 日経が +1.5% 以上の大幅上昇時
             elif nikkei_change >= 1.5:
-                weather_icon, weather_type, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", f"日経平均が力強く上昇（+{nikkei_change:.2f}%）しています。強いトレンドを持つトップセクターへの順張りが極めて有効な地合いです。"
-            # それ以外は従来のセクター内訳に基づく判定
+                if nikkei_rsi >= 75:
+                    weather_icon, weather_type, weather_color, weather_desc = "⛅", "寄り天警戒（高値掴み注意）", "#FFA500", f"日経平均は大きく上昇（+{nikkei_change:.2f}%）していますが、短期的には明確な過熱感（RSI: {nikkei_rsi:.1f}）があります。利益確定売りに押されるリスクが高く、高値掴みに注意が必要です。"
+                elif avg_up_ratio < 40:
+                    weather_icon, weather_type, weather_color, weather_desc = "☁️", "ハリボテ警戒（個別は見送り）", "#FFA500", f"指数は強く上昇（+{nikkei_change:.2f}%）していますが、市場の過半数のセクターは下落しています（騰落比率: {avg_up_ratio:.1f}%）。一部の値がさ株だけで指数を牽引しており、個別株には厳しい地合いです。"
+                else:
+                    weather_icon, weather_type, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", f"日経平均が力強く上昇（+{nikkei_change:.2f}%）し、市場全体に資金が流入しています。強いトレンドを持つトップセクターへの順張りが極めて有効です。"
+            # それ以外の中間地点
             elif avg_up_ratio >= 60 and avg_ppo_total > 0:
-                weather_icon, weather_type, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", "市場全体に資金が流入しています。強いトレンドを持つトップセクターへの順張りが有効な地合いです。"
+                weather_icon, weather_type, weather_color, weather_desc = "☀️", "リスクオン（全面高・順張り相場）", "#00D26A", "市場全体に広く資金が流入しています。強いトレンドを持つトップセクターへの順張りが有効な地合いです。"
             elif avg_up_ratio <= 40 and avg_ppo_total < 0:
                 weather_icon, weather_type, weather_color, weather_desc = "☔", "リスクオフ（全面安・逆張り警戒）", "#FF4B4B", "市場全体から資金が流出しています。安易なナンピンは避け、底打ちからのリバウンド（逆張り）やディフェンシブ銘柄を狙う地合いです。"
             else:
-                weather_icon, weather_type, weather_color, weather_desc = "☁️", "様子見（選別物色・もみ合い相場）", "#FFA500", "全体的な方向感が乏しい状態です。資金が一部のテーマや個別銘柄に集中する「循環物色」が起きやすい地合いです。"
+                weather_icon, weather_type, weather_color, weather_desc = "☁️", "様子見（選別物色・もみ合い相場）", "#888888", "全体的な方向感が乏しい状態です。資金が一部のテーマや個別銘柄に集中する「循環物色」が起きやすい地合いです。"
                 
-        # --- 明日（夜間）のロジック（米国指標・先物の動向を反映） ---
+        # --- 夜間のロジック（先物ギャップ率＋過熱感で翌日を予測） ---
         else:
-            futures = market_data.get("nikkei_futures", {}).get("change_pct", 0)
+            futures_price = market_data.get("nikkei_futures", {}).get("price", 0)
+            
+            if nikkei_close and futures_price and nikkei_close > 0:
+                gap_pct = (futures_price - nikkei_close) / nikkei_close * 100
+            else:
+                gap_pct = market_data.get("nikkei_futures", {}).get("change_pct", 0)
+            
             us_avg = (market_data.get("sp500", {}).get("change_pct", 0) + 
                       market_data.get("nasdaq", {}).get("change_pct", 0) + 
                       market_data.get("dow", {}).get("change_pct", 0)) / 3.0
             
-            # 先物と米国の総合評価
-            combined_score = futures * 0.6 + us_avg * 0.4
+            # ハリボテ判定 (前日のセクター勝率が40%未満なのに先物だけ高い)
+            is_haribote_risk = gap_pct >= 0.8 and avg_up_ratio < 40
+            # 寄り天判定 (日経のRSIが70以上で過熱しているのにギャップアップ)
+            is_yoriten_risk = gap_pct >= 0.8 and nikkei_rsi >= 70
+            # セリクラ反発判定 (RSIが30以下でギャップダウン)
+            is_serikura_risk = gap_pct <= -0.8 and nikkei_rsi <= 30
             
-            if combined_score >= 0.5:
-                 weather_icon, weather_type, weather_color, weather_desc = "☀️", "反発・ギャップアップ期待", "#00D26A", "日経先物または米国市場が好調に推移しており、明日の日本株は高く寄り付く（ギャップアップ）公算が大きいです。"
-            elif combined_score <= -0.5:
-                 weather_icon, weather_type, weather_color, weather_desc = "☔", "軟調開け・警戒モード", "#FF4B4B", "日経先物または米国市場が下落しており、明日の日本株は低く寄り付く（ギャップダウン）リスクが高まっています。"
+            if is_yoriten_risk:
+                weather_icon, weather_type, weather_color, weather_desc = "⛅", "寄り天警戒（高値掴み注意）", "#FFA500", f"先物は高く推移（ギャップ予想: +{gap_pct:.1f}%）していますが、直近の過熱感（RSI: {nikkei_rsi:.0f}）が高水準です。寄り付き直後に強い利益確定売りに押される「寄り天リスク」があり、高値掴みに注意が必要です。"
+            elif is_haribote_risk:
+                weather_icon, weather_type, weather_color, weather_desc = "☁️", "ハリボテ開け（一部の循環物色）", "#FFA500", f"先物は高く始まりそう（ギャップ予想: +{gap_pct:.1f}%）ですが、前日の市場の広がり（騰落比率: {avg_up_ratio:.0f}%）を欠いています。米国市場に引きずられた一時的な連れ高や、一部の銘柄への集中に留まる可能性があります。"
+            elif is_serikura_risk:
+                weather_icon, weather_type, weather_color, weather_desc = "⛈️", "底打ち反発期待（セリクラ）", "#4C9BE8", f"安く始まりそう（ギャップ予想: {gap_pct:.1f}%）ですが、市場はすでに総悲観（RSI: {nikkei_rsi:.0f}）の売られすぎ水準にあります。売り一巡後からの強いリバウンドに期待できる地合いです。"
+            elif gap_pct >= 1.0:
+                weather_icon, weather_type, weather_color, weather_desc = "☀️", "ギャップアップ期待（強気）", "#00D26A", f"日経先物が日経終値を大きく上回っています（ギャップ予想: +{gap_pct:.1f}%）。明日は高く寄り付く公算が大きく、順張りが有効な地合いです。"
+            elif gap_pct <= -1.0:
+                weather_icon, weather_type, weather_color, weather_desc = "☔", "ギャップダウン警戒（弱気）", "#FF4B4B", f"日経先物が日経終値を大きく下回っています（ギャップ予想: {gap_pct:.1f}%）。明日は安く寄り付くリスクが高く、ポジション縮小を検討すべき地合いです。"
             else:
-                 weather_icon, weather_type, weather_color, weather_desc = "☁️", "方向感薄・個別の物色", "#FFA500", "夜間の主要指数は大きな方向感を示していません。明日の日本市場は個別材料や特定のセクター内での循環物色が中心になりそうです。"
+                combined_score = gap_pct * 0.6 + us_avg * 0.4
+                if combined_score >= 0.3:
+                    weather_icon, weather_type, weather_color, weather_desc = "☀️", "やや強気・反発期待", "#00D26A", f"日経先物と米国市場の動向から、明日は小幅高で寄り付く可能性があります（ギャップ予想: {gap_pct:+.1f}%）。"
+                elif combined_score <= -0.3:
+                    weather_icon, weather_type, weather_color, weather_desc = "☔", "やや弱気・軟調開け", "#FF4B4B", f"日経先物と米国市場の動向から、明日は小幅安で寄り付く可能性があります（ギャップ予想: {gap_pct:+.1f}%）。"
+                else:
+                    weather_icon, weather_type, weather_color, weather_desc = "☁️", "方向感薄・個別の物色", "#888888", f"夜間の主要指数は大きな方向感を示していません（ギャップ予想: {gap_pct:+.1f}%）。明日は個別材料やセクター内での循環物色が中心になりそうです。"
+
+        # AIの天気予報コメントをweather_descにさりげなく追記
+        try:
+            from modules.ai_analyzer import get_shared_ai_insight
+            _db_p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sector_rotation.db")
+            _db_v = os.path.getmtime(_db_p) if os.path.exists(_db_p) else 0
+            _, _, _ai_wc = get_shared_ai_insight(latest_date, _db_v)
+            if _ai_wc:
+                weather_desc += f" {_ai_wc}"
+        except Exception:
+            pass  # AI取得に失敗しても天気予報自体は表示する
 
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, rgba(30,40,55,0.95) 0%, rgba(15,20,30,0.95) 100%); border-left: 5px solid {weather_color}; padding: 15px 20px; border-radius: 6px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
@@ -319,7 +362,7 @@ def render():
     
     _db_p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sector_rotation.db")
     db_version = os.path.getmtime(_db_p) if os.path.exists(_db_p) else 0
-    ai_text, analyzed_at = get_shared_ai_insight(latest_date, db_version)
+    ai_text, analyzed_at, ai_weather_comment = get_shared_ai_insight(latest_date, db_version)
 
     # 次回更新可能時刻を計算
     try:

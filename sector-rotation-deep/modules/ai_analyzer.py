@@ -120,9 +120,21 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 * **売られすぎの正体:** リストアップされた「売られすぎ銘柄」は、単なる調整か？それとも悪材料が出た「落ちるナイフ」か？ニュースと照らし合わせて判断せよ。
 * **注目銘柄:** 特にリバウンドが期待できそうな銘柄を1つ挙げ、その定量的・定性的な根拠を述べよ。
 
+## 4. 🌤️ 相場天気予報コメント
+以下の形式で、**必ず1行だけ**出力せよ（見出しやラベルは不要、コメント本文のみ）。
+[WEATHER_COMMENT] ここにコメントを記載
+
+このコメントは、ダッシュボードの天気予報パネルに表示される「解説文」の一部として使われる。
+以下のルールに従って書くこと：
+* 現在のニュース・材料と、日経先物やマクロ指標の動きを照らし合わせ、**この動きが「構造的（ファンダメンタルズに裏付けられた）」なのか、「一時的な連れ高/連れ安」なのか**を1〜2文で端的に判定して書け。
+* 例（構造的な場合）：「米中関係の改善報道を受けた買いが入っており、半導体を中心に実需の買いが期待できます。」
+* 例（一時的な場合）：「目立った国内材料はなく、米国ハイテク株の上昇に引きずられた連れ高の可能性があります。寄り付き後の値動きに注意が必要です。」
+* 例（悲観的な場合）：「地政学リスクの高まりを嫌気した売りが優勢ですが、決算シーズンを控えた押し目買いも入りやすい水準です。」
+
 【制約事項】
 * 「変動しました」という曖昧な表現は禁止。「暴落」「急騰」「底堅い」など強い言葉を使うこと。
 * ニュースがない場合は「特段の材料は見当たらないが、需給要因と思われる」と正直に書くこと。
+* [WEATHER_COMMENT]の行は**必ず出力**すること。
 """
 
     return prompt
@@ -130,44 +142,63 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
 
 def _execute_gemini_call(prompt: str, api_key: str) -> str:
     """
-    Gemini REST API\u3092\u76f4\u63a5\u547c\u3073\u51fa\u3059\uff08grpcio\u4e0d\u8981\u306erequests\u4f7f\u7528\uff09
-    ARM64\u74b0\u5883\u3084\u30d3\u30eb\u30c9\u74b0\u5883\u3067\u3082\u52d5\u4f5c\u3059\u308b\u3088\u3046\u306bgrpc\u4f9d\u5b58\u975e\u5e38\u306b\u5b9f\u88c5\u3002
+    Gemini REST APIを直接呼び出す（grpcio不要のrequests使用）
+    ARM64環境やビルド環境でも動作するようにgrpc依存なしで実装。
+    429エラー時は120秒待機後に1回リトライする。
     """
     import requests as _req
     import json
+    import time as _time
 
     models_to_try = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"]
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    last_error = None
-    for model_name in models_to_try:
-        url = f"{base_url}/{model_name}:generateContent?key={api_key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 8000}
-        }
-        try:
-            resp = _req.post(url, json=payload, timeout=120)
-            if resp.status_code == 429:
-                last_error = (
-                    "APIの利用制限（429: Quota Exceeded）に達しました。\n\n"
-                    "Google AI Studioの設定から「従量課金（Pay-as-you-go）」を有効にしてください。"
-                )
-                break
-            if resp.status_code == 404:
-                # このモデルが存在しない場合は次を試す
-                last_error = f"Model {model_name} not found (404)"
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-            if text:
-                return text
-        except Exception as e:
-            last_error = str(e)
-            continue
+    max_429_retries = 1  # 429エラー時の最大リトライ回数
+    retry_429_count = 0
 
-    raise Exception(f"Gemini API\u306e\u547c\u3073\u51fa\u3057\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002\u8a73\u7d30: {last_error}")
+    last_error = None
+    while True:
+        for model_name in models_to_try:
+            url = f"{base_url}/{model_name}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 8000}
+            }
+            try:
+                resp = _req.post(url, json=payload, timeout=120)
+                if resp.status_code == 429:
+                    last_error = (
+                        "APIの利用制限（429: Quota Exceeded）に達しました。\n\n"
+                        "Google AI Studioの設定から「従量課金（Pay-as-you-go）」を有効にしてください。"
+                    )
+                    # 429はリトライ可能 → ループを抜けてリトライ判定へ
+                    break
+                if resp.status_code == 404:
+                    # このモデルが存在しない場合は次を試す
+                    last_error = f"Model {model_name} not found (404)"
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                if text:
+                    return text
+            except Exception as e:
+                last_error = str(e)
+                continue
+        else:
+            # forループが正常終了（breakせず） = 429以外のエラーで全モデル失敗 → 諦める
+            break
+
+        # 429で抜けてきた場合のリトライ判定
+        if retry_429_count < max_429_retries:
+            retry_429_count += 1
+            print(f"⏳ Gemini API 429エラー: {120}秒待機後にリトライします ({retry_429_count}/{max_429_retries})...")
+            _time.sleep(120)
+            continue
+        else:
+            break
+
+    raise Exception(f"Gemini APIの呼び出しに失敗しました。詳細: {last_error}")
 
 
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
@@ -271,8 +302,18 @@ def get_shared_ai_insight(date_str: str, db_version: float):
         
         result = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text, market_overview)
         
+        # AIの返答から天気予報コメントをパースする
+        weather_comment = ""
+        if result and "[WEATHER_COMMENT]" in result:
+            for line in result.split("\n"):
+                if "[WEATHER_COMMENT]" in line:
+                    weather_comment = line.replace("[WEATHER_COMMENT]", "").strip()
+                    break
+            # 本文からマーカー行を除去（AIインサイト表示時に邪魔にならないよう）
+            result = "\n".join(l for l in result.split("\n") if "[WEATHER_COMMENT]" not in l)
+        
         jst = timezone(timedelta(hours=9))
-        return result, datetime.now(jst).strftime("%H:%M")
+        return result, datetime.now(jst).strftime("%H:%M"), weather_comment
         
     return _run_analysis(date_str, db_version)
 

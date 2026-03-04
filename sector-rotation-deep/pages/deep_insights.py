@@ -46,7 +46,7 @@ def render():
     import os as _os
     _db_p = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "data", "sector_rotation.db")
     db_version = _os.path.getmtime(_db_p) if _os.path.exists(_db_p) else 0
-    insight, analyzed_at = get_shared_ai_insight(latest_date, db_version)
+    insight, analyzed_at, _ = get_shared_ai_insight(latest_date, db_version)
 
     # 次回更新可能時刻を計算
     try:
