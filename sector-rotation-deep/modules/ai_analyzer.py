@@ -150,7 +150,7 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
     import json
     import time as _time
 
-    models_to_try = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
     max_429_retries = 1  # 429エラー時の最大リトライ回数
