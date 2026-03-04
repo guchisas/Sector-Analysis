@@ -103,6 +103,13 @@ def init_db():
     conn.close()
 
 
+def get_db_last_modified() -> float:
+    """DBファイルの最終更新時刻をUNIXタイムスタンプ（float）で返す。ファイルがなければ0を返す。"""
+    if os.path.exists(DB_PATH):
+        return os.path.getmtime(DB_PATH)
+    return 0.0
+
+
 def upsert_market_data(records: list[dict]):
     """
     市場データをUpsertする（INSERT OR REPLACE）

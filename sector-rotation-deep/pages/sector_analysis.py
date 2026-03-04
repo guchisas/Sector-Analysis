@@ -46,8 +46,8 @@ def render():
     st.markdown(f"**分析日: {latest_date}**")
 
     # 画面上部でのセクター選択（URLパラメータ対応）
-    from modules.momentum_calculator import calculate_sector_momentum
-    momentum_df = calculate_sector_momentum(latest_date)
+    from modules.momentum_calculator import calculate_sector_momentum_scores
+    momentum_df = calculate_sector_momentum_scores(latest_date)
     if not momentum_df.empty:
         # 資金流入スコア（momentum_score）の降順でランキング
         momentum_df = momentum_df.sort_values("momentum_score", ascending=False)
