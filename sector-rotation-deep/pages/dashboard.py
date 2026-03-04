@@ -143,7 +143,6 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
     
     # --- 時間帯判定とロジック分岐 ---
-    from datetime import datetime
     now_hour = datetime.now().hour
     is_forecast_tomorrow = now_hour >= 15 or now_hour < 9  # 15:00〜翌08:59は「明日の予報」
     
