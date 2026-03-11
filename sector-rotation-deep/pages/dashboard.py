@@ -29,6 +29,7 @@ from modules.ai_analyzer import analyze_with_gemini
 from modules.news_fetcher import fetch_news_summary
 from modules.momentum_calculator import calculate_sector_momentum_scores
 from modules.market_overview import fetch_market_overview, render_market_panel_html
+from modules.macro_wind_forecaster import fetch_us_gear_data, generate_wind_forecast
 from utils.styles import metric_card, stock_card, section_header, empty_state
 
 
@@ -262,6 +263,67 @@ def render():
             <div style="font-size: 0.95rem; color: #d0d0d0; line-height: 1.5;">{weather_desc}</div>
         </div>
         """, unsafe_allow_html=True)
+
+    # ===== セクター風向き予想（米国市場からの波及） =====
+    try:
+        _gear_data = fetch_us_gear_data()
+        _tailwinds, _headwinds = generate_wind_forecast(_gear_data)
+
+        st.markdown(section_header("本日のセクター風向き予想", "🌤️"), unsafe_allow_html=True)
+        st.caption("前夜の米国サブセクターETF・マクロ指標の動向から、本日の東証33業種への波及を自動判定しています。")
+
+        _wind_col_left, _wind_col_right = st.columns(2)
+
+        with _wind_col_left:
+            if _tailwinds:
+                _tw_items = "".join(
+                    f'<div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">'
+                    f'<span style="font-size: 1.05rem; font-weight: bold; color: #FF6B6B;">{t["sector"]}</span><br>'
+                    f'<span style="font-size: 0.8rem; color: #a0a0a0;">{t["reason"]}</span>'
+                    f'</div>'
+                    for t in _tailwinds
+                )
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, rgba(40,20,20,0.9) 0%, rgba(25,15,15,0.95) 100%); border-left: 4px solid #FF4B4B; border-radius: 8px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                    <div style="font-size: 1.1rem; font-weight: bold; color: #FF4B4B; margin-bottom: 10px;">🔥 追い風セクター</div>
+                    {_tw_items}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="background: rgba(30,30,30,0.8); border-left: 4px solid #555; border-radius: 8px; padding: 16px 20px;">
+                    <div style="font-size: 1.1rem; font-weight: bold; color: #888; margin-bottom: 8px;">🔥 追い風セクター</div>
+                    <div style="color: #777; font-size: 0.9rem;">特筆すべき追い風セクターはありません<br>（フラットな地合いです）</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with _wind_col_right:
+            if _headwinds:
+                _hw_items = "".join(
+                    f'<div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">'
+                    f'<span style="font-size: 1.05rem; font-weight: bold; color: #4C9BE8;">{h["sector"]}</span><br>'
+                    f'<span style="font-size: 0.8rem; color: #a0a0a0;">{h["reason"]}</span>'
+                    f'</div>'
+                    for h in _headwinds
+                )
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, rgba(20,25,40,0.9) 0%, rgba(15,18,30,0.95) 100%); border-left: 4px solid #4C9BE8; border-radius: 8px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                    <div style="font-size: 1.1rem; font-weight: bold; color: #4C9BE8; margin-bottom: 10px;">⚠️ 逆風セクター</div>
+                    {_hw_items}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="background: rgba(30,30,30,0.8); border-left: 4px solid #555; border-radius: 8px; padding: 16px 20px;">
+                    <div style="font-size: 1.1rem; font-weight: bold; color: #888; margin-bottom: 8px;">⚠️ 逆風セクター</div>
+                    <div style="color: #777; font-size: 0.9rem;">特筆すべき逆風セクターはありません<br>（フラットな地合いです）</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+    except Exception as _wind_err:
+        # APIエラー時もダッシュボード全体に影響を与えない
+        print(f"⚠️ セクター風向き予想の取得に失敗: {_wind_err}")
 
     # ===== 市場概況（地合い）表示エリア =====
     st.markdown(section_header("指標・マクロ概況", "🌐"), unsafe_allow_html=True)
@@ -781,10 +843,10 @@ def render():
             
         with col_btn:
             if st.button("▶ 詳細分析へ", use_container_width=True, type="primary"):
-                # Streamlitのnative multipage(ページURL遷移)とapp.pyのルーティングが衝突するのを防ぐため、
-                # st.switch_pageを使わずにセッションステートを書き換えてapp.pyから再描画させる
+                # ウィジェットのkeyに紐づくsession_stateキーへの直接代入はStreamlitAPIExceptionを
+                # 引き起こすため、中間キー "_nav_target" を介してapp.py側でページ遷移を処理する
                 st.session_state["target_sector"] = target_sector
-                st.session_state["current_page"] = "📊 セクター分析"
+                st.session_state["_nav_target"] = "📊 セクター分析"
                 st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 

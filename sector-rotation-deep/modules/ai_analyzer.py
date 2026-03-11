@@ -140,6 +140,92 @@ def _build_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
     return prompt
 
 
+def _build_line_prompt(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
+                  volume_surge_stocks: pd.DataFrame, news_text: str, market_overview: dict) -> str:
+    """LINE制約付きの短く要約されたプロンプトを構築する"""
+
+    # セクター騰落率テキスト
+    sector_text = "【全33業種のセクター別データ】\n"
+    if not sector_summary.empty:
+        for _, row in sector_summary.iterrows():
+            avg_vr = row.get('avg_volume_ratio', 0) if pd.notna(row.get('avg_volume_ratio')) else 0
+            avg_pct = row.get('avg_percent_change', 0) if pd.notna(row.get('avg_percent_change')) else 0
+            sector_text += f"- {row['sector']}: {avg_pct:+.2f}%, 出来高 {avg_vr:.2f}x\n"
+    else:
+        sector_text += "データなし\n"
+
+    oversold_text = "\n【RSI 30以下の売られすぎ銘柄】\n"
+    if not oversold_stocks.empty:
+        for _, row in oversold_stocks.head(5).iterrows():
+            oversold_text += f"- {row['ticker']} ({row.get('name', '')})\n"
+    else:
+        oversold_text += "該当なし\n"
+
+    volume_text = "\n【出来高急増銘柄】\n"
+    if not volume_surge_stocks.empty:
+        for _, row in volume_surge_stocks.head(5).iterrows():
+            volume_text += f"- {row['ticker']} ({row.get('name', '')})\n"
+    else:
+        volume_text += "該当なし\n"
+
+    macro_text = "【主要マクロ指標】\n"
+    if market_overview:
+        for key, data in market_overview.items():
+            name = data.get("name", key)
+            val = data.get("price", 0)
+            chg = data.get("change_pct", 0)
+            macro_text += f"- {name}: {val:,.2f} ({chg:+.2f}%)\n"
+    else:
+        macro_text += "データなし\n"
+
+    prompt = f"""
+あなたは、「辛口かつ論理的な株式ストラテジスト」です。
+提供された「定量データ（株価）」と「最新ニュース」を深く統合し、以下のフォーマットで**LINEで読みやすい短いレポート**を作成してください。
+
+【入力データ】
+1. マクロ環境ダッシュボード:
+{macro_text}
+
+2. セクター分析データ:
+{sector_text}
+
+3. 注目銘柄データ:
+{oversold_text}
+{volume_text}
+
+4. 最新ニュース:
+{news_text}
+
+【出力フォーマット】
+必ず以下の形式に厳密に従い、短く端的に（全体で400文字程度）まとめてください。箇条書きを多用し、見出しの絵文字もそのまま使ってください。Markdownのリッチな記法（** や # など）は使用しないでください。
+
+■ 1. 本日の相場テーマ：[ズバリ一言で]
+[理由や背景を2〜3文で簡潔に。マクロ指標とニュースを絡める]
+
+指数の動向:
+[日経平均やNYダウなどの特徴的な動きを1文で]
+
+■ 2. セクター動向：資金は「[流出元]」から「[流入先]」へ
+🟢 強いセクター（資金流入トップ）
+[セクター名]: [理由を1文で]
+[セクター名]: [理由を1文で]
+
+🔴 弱いセクター（資金流出・出遅れ）
+[セクター名]: [理由を1文で]
+
+■ 3. 個別銘柄・トレード戦略
+[現在の地合いに基づく、全体のトレード方針を1〜2文で]
+
+📝 監視銘柄（テクニカル・異常値）:
+[銘柄名] ([ティッカー]): [注目理由を1文で]
+
+📉 RSI30以下の売られすぎ銘柄:
+[セクター名]: [銘柄名1]、[銘柄名2]
+（※これらが買い場か、落ちるナイフかの一言コメント）
+"""
+
+    return prompt
+
 def _execute_gemini_call(prompt: str, api_key: str) -> str:
     """
     Gemini REST APIを直接呼び出す（grpcio不要のrequests使用）
@@ -204,7 +290,7 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
 def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
                         volume_surge_stocks: pd.DataFrame, news_text: str, market_overview: dict = None) -> str:
     """
-    Gemini APIを使用してセクターローテーション分析を実行する
+    Gemini APIを使用してセクターローテーション分析（詳細版）を実行する
     APIキー未設定やエラー時はフォールバックサマリーを返す
     """
     api_key = _get_api_key()
@@ -214,6 +300,25 @@ def analyze_with_gemini(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFr
 
     try:
         prompt = _build_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text, market_overview)
+        return _execute_gemini_call(prompt, api_key)
+
+    except Exception as e:
+        error_msg = f"⚠️ Gemini API エラー: {str(e)}\n\n"
+        error_msg += _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
+        return error_msg
+
+def analyze_for_line(sector_summary: pd.DataFrame, oversold_stocks: pd.DataFrame,
+                        volume_surge_stocks: pd.DataFrame, news_text: str, market_overview: dict = None) -> str:
+    """
+    Gemini APIを使用してLINE向けに要約された分析を実行する
+    """
+    api_key = _get_api_key()
+
+    if not api_key:
+        return _generate_fallback_summary(sector_summary, oversold_stocks, volume_surge_stocks)
+
+    try:
+        prompt = _build_line_prompt(sector_summary, oversold_stocks, volume_surge_stocks, news_text, market_overview)
         return _execute_gemini_call(prompt, api_key)
 
     except Exception as e:

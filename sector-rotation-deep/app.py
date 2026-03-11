@@ -32,17 +32,27 @@ st.markdown(get_custom_css(), unsafe_allow_html=True)
 init_db()
 
 # ===== サイドバー =====
+
+# ページリスト
+_PAGES = ["🏠 ダッシュボード", "📊 セクター分析", "📋 銘柄チャート", "🎯 四季報スナイパー", "🤖 AIインサイト", "📰 ニュースフィード", "📘 運用ガイド"]
+
+# 外部ページ（dashboard.pyなど）からの遷移リクエストを検知
+_default_index = 0
+if "_nav_target" in st.session_state:
+    _target = st.session_state.pop("_nav_target")
+    if _target in _PAGES:
+        _default_index = _PAGES.index(_target)
+    # session_stateに既存のcurrent_pageがあるとindexが無視されるため削除
+    st.session_state.pop("current_page", None)
+
 with st.sidebar:
     st.markdown("## 📈 セクター分析")
     st.markdown("---")
 
-    # ナビゲーションの実装（st.switch_pageのバグ回避のためsession_state管理）
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = "🏠 ダッシュボード"
-
     page = st.radio(
         "ページ選択",
-        ["🏠 ダッシュボード", "📊 セクター分析", "📋 銘柄チャート", "🎯 四季報スナイパー", "🤖 AIインサイト", "📰 ニュースフィード", "📘 運用ガイド"],
+        _PAGES,
+        index=_default_index,
         key="current_page",
         label_visibility="collapsed",
     )

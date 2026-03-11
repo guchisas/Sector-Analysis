@@ -41,7 +41,7 @@ from modules.technical_analysis import get_latest_indicators
 from modules.jpx_stock_list import get_all_stocks, get_ticker_to_sector, get_ticker_to_name
 from modules.market_overview import fetch_market_overview
 from modules.news_fetcher import fetch_news_summary
-from modules.ai_analyzer import analyze_with_gemini
+from modules.ai_analyzer import analyze_with_gemini, analyze_for_line
 
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
@@ -161,13 +161,13 @@ def main():
 
     # 4. DBから最新の分析データを抽出
     sector_summary = get_sector_summary(None)
-    oversold = get_oversold_stocks(None)
-    volume_surge = get_volume_surge_stocks(None)
+    oversold_stocks = get_oversold_stocks(None)
+    volume_surge_stocks = get_volume_surge_stocks(None)
 
-    # 5. Gemini AI 分析の実行
-    print("[4/5] Gemini AIで深層分析中...")
+    # 5. Gemini AI 分析の実行 (LINE専用の要約版)
+    print("[4/5] Gemini AIでLINE用レポートを生成中...")
     try:
-        report = analyze_with_gemini(sector_summary, oversold, volume_surge, news_text, market_overview)
+        report = analyze_for_line(sector_summary, oversold_stocks, volume_surge_stocks, news_text, market_overview)
         print("      完了")
     except Exception as e:
         print(f"      失敗: {e}")
@@ -177,8 +177,8 @@ def main():
     # 6. レポートの整形と送信
     date_str = now.strftime("%m/%d %H:%M")
     header = f"AI朝刊マーケットレポート ({date_str} JST)\n" + "=" * 30 + "\n"
-    # Markdown記法（#, *, -）をLINEで読みやすい記号に最低限置換する
-    formatted_report = report.replace("## ", "[■] ").replace("### ", "[・] ").replace("**", "")
+    # 短縮版ではMarkdown記法をプロンプトで禁止しているが、念のため残す
+    formatted_report = report.replace("## ", "■ ").replace("### ", "・ ").replace("**", "")
     final_message = f"{header}\n{formatted_report}"
 
     print("[5/5] LINEへ送信中...")
