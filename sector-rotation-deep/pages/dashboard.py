@@ -29,7 +29,7 @@ from modules.ai_analyzer import analyze_with_gemini
 from modules.news_fetcher import fetch_news_summary
 from modules.momentum_calculator import calculate_sector_momentum_scores
 from modules.market_overview import fetch_market_overview, render_market_panel_html
-from modules.macro_wind_forecaster import fetch_us_gear_data, generate_wind_forecast
+from modules.macro_wind_forecaster import get_macro_wind_forecast
 from utils.styles import metric_card, stock_card, section_header, empty_state
 
 
@@ -264,61 +264,140 @@ def render():
         </div>
         """, unsafe_allow_html=True)
 
-    # ===== セクター風向き予想（米国市場からの波及） =====
+    # ===== 🌍 海外機関プレイブック＆セクター風向き予想（ストーリーボードUI） =====
     try:
-        _gear_data = fetch_us_gear_data()
-        _tailwinds, _headwinds = generate_wind_forecast(_gear_data)
+        _wind_result = get_macro_wind_forecast()
+        _playbook = _wind_result.get("playbook", "")
+        _tailwinds = _wind_result.get("tailwind_sectors", [])
+        _headwinds = _wind_result.get("headwind_sectors", [])
+        _evidence = _wind_result.get("evidence", {})
+        _warnings = _wind_result.get("warnings", [])
+        _is_us_holiday = _wind_result.get("is_us_holiday", False)
+        _is_earnings = _wind_result.get("is_earnings_season", False)
+        _wind_analyzed = _wind_result.get("analyzed_at", "")
 
-        st.markdown(section_header("本日のセクター風向き予想", "🌤️"), unsafe_allow_html=True)
-        st.caption("前夜の米国サブセクターETF・マクロ指標の動向から、本日の東証33業種への波及を自動判定しています。")
+        st.markdown(section_header("海外機関のプレイブック ＆ 本日の日本株風向き", "🌍"), unsafe_allow_html=True)
+        st.caption(f"前夜の米国市場の定量データとニュースをAIが統合分析し、機関投資家の資金移動の意図を抽出しています。（🕐 {_wind_analyzed} 時点）")
 
-        _wind_col_left, _wind_col_right = st.columns(2)
+        # --- [1] The Playbook（AI生成の統合シナリオ） ---
+        if _is_us_holiday:
+            # 米国休場時: フラットUI
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(30,35,45,0.95) 0%, rgba(20,25,35,0.95) 100%); border-left: 5px solid #555; padding: 20px 24px; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                <div style="font-size: 0.85rem; color: #888; font-weight: 600; letter-spacing: 1px; margin-bottom: 8px;">📖 THE PLAYBOOK</div>
+                <div style="font-size: 1.05rem; color: #999; line-height: 1.7;">🔇 {_playbook}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # 通常時: 特大ハイライトボックス
+            _playbook_border = "#FFB347"  # ゴールド
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(40,35,20,0.95) 0%, rgba(25,22,12,0.95) 100%); border-left: 5px solid {_playbook_border}; padding: 20px 24px; border-radius: 8px; margin-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
+                <div style="font-size: 0.85rem; color: #FFB347; font-weight: 600; letter-spacing: 1px; margin-bottom: 10px;">📖 THE PLAYBOOK ─ 昨晩の海外機関の意図</div>
+                <div style="font-size: 1.1rem; color: #E8E0D0; line-height: 1.8; font-weight: 500;">{_playbook}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        with _wind_col_left:
-            if _tailwinds:
-                _tw_items = "".join(
-                    f'<div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">'
-                    f'<span style="font-size: 1.05rem; font-weight: bold; color: #FF6B6B;">{t["sector"]}</span><br>'
-                    f'<span style="font-size: 0.8rem; color: #a0a0a0;">{t["reason"]}</span>'
-                    f'</div>'
-                    for t in _tailwinds
-                )
+        # --- カレンダー警告バッジ ---
+        if _warnings:
+            _warn_html = " ".join(
+                f'<span style="background: rgba(255,165,0,0.15); color: #FFA500; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; margin-right: 6px;">{w}</span>'
+                for w in _warnings
+            )
+            st.markdown(f'<div style="margin-bottom: 12px;">{_warn_html}</div>', unsafe_allow_html=True)
+
+        # --- [2] The Evidence（ファクトバッジ群） ---
+        if not _is_us_holiday:
+            _regime_label = _evidence.get("macro_regime_label", "")
+            _strongest = _evidence.get("strongest")
+            _weakest = _evidence.get("weakest")
+            _fx_price = _evidence.get("fx_price", 0)
+            _futures_price = _evidence.get("futures_price", 0)
+            _yield_spread = _evidence.get("yield_spread", 0)
+            _oil_change = _evidence.get("oil_change", 0)
+
+            _badge_parts = []
+            if _regime_label:
+                _badge_parts.append(f'<span style="background: rgba(255,255,255,0.08); color: #d0d0d0; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">{_regime_label}</span>')
+            if _strongest:
+                _s_color = "#FF6B6B" if _strongest["change"] > 0 else "#4C9BE8"
+                _badge_parts.append(f'<span style="background: rgba(255,75,75,0.1); color: {_s_color}; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem;">🔺 {_strongest["ticker"]} {_strongest["change"]:+.1f}%</span>')
+            if _weakest:
+                _w_color = "#4C9BE8" if _weakest["change"] < 0 else "#FF6B6B"
+                _badge_parts.append(f'<span style="background: rgba(76,155,232,0.1); color: {_w_color}; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem;">🔻 {_weakest["ticker"]} {_weakest["change"]:+.1f}%</span>')
+            if _fx_price:
+                _badge_parts.append(f'<span style="background: rgba(255,255,255,0.05); color: #aaa; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem;">💱 ¥{_fx_price:,.2f}</span>')
+            if _futures_price:
+                _badge_parts.append(f'<span style="background: rgba(255,255,255,0.05); color: #aaa; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem;">🌙 先物 ¥{_futures_price:,.0f}</span>')
+            if _yield_spread:
+                _ys_color = "#FF6B6B" if _yield_spread > 0 else "#4C9BE8"
+                _badge_parts.append(f'<span style="background: rgba(255,255,255,0.05); color: {_ys_color}; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem;">📐 金利差 {_yield_spread:+.2f}%</span>')
+            if _oil_change:
+                _oil_color = "#FF6B6B" if _oil_change > 0 else "#4C9BE8"
+                _badge_parts.append(f'<span style="background: rgba(255,255,255,0.05); color: {_oil_color}; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem;">🛢️ 原油 {_oil_change:+.1f}%</span>')
+
+            if _badge_parts:
+                _evidence_html = " ".join(_badge_parts)
                 st.markdown(f"""
-                <div style="background: linear-gradient(135deg, rgba(40,20,20,0.9) 0%, rgba(25,15,15,0.95) 100%); border-left: 4px solid #FF4B4B; border-radius: 8px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                    <div style="font-size: 1.1rem; font-weight: bold; color: #FF4B4B; margin-bottom: 10px;">🔥 追い風セクター</div>
-                    {_tw_items}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="background: rgba(30,30,30,0.8); border-left: 4px solid #555; border-radius: 8px; padding: 16px 20px;">
-                    <div style="font-size: 1.1rem; font-weight: bold; color: #888; margin-bottom: 8px;">🔥 追い風セクター</div>
-                    <div style="color: #777; font-size: 0.9rem;">特筆すべき追い風セクターはありません<br>（フラットな地合いです）</div>
+                <div style="background: rgba(15,18,25,0.6); padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                    <span style="font-size: 0.75rem; color: #666; font-weight: 600; margin-right: 6px;">📊 EVIDENCE</span>
+                    {_evidence_html}
                 </div>
                 """, unsafe_allow_html=True)
 
-        with _wind_col_right:
-            if _headwinds:
-                _hw_items = "".join(
-                    f'<div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">'
-                    f'<span style="font-size: 1.05rem; font-weight: bold; color: #4C9BE8;">{h["sector"]}</span><br>'
-                    f'<span style="font-size: 0.8rem; color: #a0a0a0;">{h["reason"]}</span>'
-                    f'</div>'
-                    for h in _headwinds
-                )
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, rgba(20,25,40,0.9) 0%, rgba(15,18,30,0.95) 100%); border-left: 4px solid #4C9BE8; border-radius: 8px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                    <div style="font-size: 1.1rem; font-weight: bold; color: #4C9BE8; margin-bottom: 10px;">⚠️ 逆風セクター</div>
-                    {_hw_items}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="background: rgba(30,30,30,0.8); border-left: 4px solid #555; border-radius: 8px; padding: 16px 20px;">
-                    <div style="font-size: 1.1rem; font-weight: bold; color: #888; margin-bottom: 8px;">⚠️ 逆風セクター</div>
-                    <div style="color: #777; font-size: 0.9rem;">特筆すべき逆風セクターはありません<br>（フラットな地合いです）</div>
-                </div>
-                """, unsafe_allow_html=True)
+        # --- [3] Actionable Forecast（追い風/逆風カード） ---
+        if not _is_us_holiday:
+            _wind_col_left, _wind_col_right = st.columns(2)
+
+            with _wind_col_left:
+                if _tailwinds:
+                    _tw_items = "".join(
+                        f'<div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">'
+                        f'<span style="font-size: 1.05rem; font-weight: bold; color: #FF6B6B;">{t.get("sub_focus", t["sector"])}</span>'
+                        f'<span style="font-size: 0.75rem; color: #777; margin-left: 6px;">({t["sector"]})</span>'
+                        f'<span style="font-size: 0.7rem; color: #555; margin-left: 6px;">📌{t.get("evidence_ticker", "")}</span><br>'
+                        f'<span style="font-size: 0.8rem; color: #a0a0a0;">{t.get("reason", "")}</span>'
+                        f'</div>'
+                        for t in _tailwinds
+                    )
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, rgba(40,20,20,0.9) 0%, rgba(25,15,15,0.95) 100%); border-left: 4px solid #FF4B4B; border-radius: 8px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                        <div style="font-size: 1.1rem; font-weight: bold; color: #FF4B4B; margin-bottom: 10px;">🔥 本日の主役セクター</div>
+                        {_tw_items}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="background: rgba(30,30,30,0.8); border-left: 4px solid #555; border-radius: 8px; padding: 16px 20px;">
+                        <div style="font-size: 1.1rem; font-weight: bold; color: #888; margin-bottom: 8px;">🔥 本日の主役セクター</div>
+                        <div style="color: #777; font-size: 0.9rem;">特筆すべき追い風セクターはありません<br>（フラットな地合いです）</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            with _wind_col_right:
+                if _headwinds:
+                    _hw_items = "".join(
+                        f'<div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">'
+                        f'<span style="font-size: 1.05rem; font-weight: bold; color: #4C9BE8;">{h.get("sub_focus", h["sector"])}</span>'
+                        f'<span style="font-size: 0.75rem; color: #777; margin-left: 6px;">({h["sector"]})</span>'
+                        f'<span style="font-size: 0.7rem; color: #555; margin-left: 6px;">📌{h.get("evidence_ticker", "")}</span><br>'
+                        f'<span style="font-size: 0.8rem; color: #a0a0a0;">{h.get("reason", "")}</span>'
+                        f'</div>'
+                        for h in _headwinds
+                    )
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, rgba(20,25,40,0.9) 0%, rgba(15,18,30,0.95) 100%); border-left: 4px solid #4C9BE8; border-radius: 8px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                        <div style="font-size: 1.1rem; font-weight: bold; color: #4C9BE8; margin-bottom: 10px;">⚠️ 警戒セクター</div>
+                        {_hw_items}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="background: rgba(30,30,30,0.8); border-left: 4px solid #555; border-radius: 8px; padding: 16px 20px;">
+                        <div style="font-size: 1.1rem; font-weight: bold; color: #888; margin-bottom: 8px;">⚠️ 警戒セクター</div>
+                        <div style="color: #777; font-size: 0.9rem;">特筆すべき逆風セクターはありません<br>（フラットな地合いです）</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
     except Exception as _wind_err:

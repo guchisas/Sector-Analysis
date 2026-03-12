@@ -716,3 +716,136 @@ def get_sector_map():
 def get_name_map():
     """ティッカー→銘柄名のマッピング辞書を返す"""
     return {t: n for t, n, _ in get_stock_list()}
+
+
+# =====================================================================
+# マクロ風向き予想用ティッカー定義
+# =====================================================================
+MACRO_TICKERS = {
+    # --- 主要指数 ---
+    "indices": {
+        "^GSPC": "S&P 500",
+        "^DJI":  "NYダウ",
+        "^IXIC": "NASDAQ",
+    },
+    # --- 金利 ---
+    "rates": {
+        "^TNX": "米10年債利回り",
+        "^IRX": "米13週国債利回り",
+    },
+    # --- コモディティ ---
+    "commodities": {
+        "CL=F": "WTI原油先物",
+    },
+    # --- リアルタイム取得対象（為替・先物） ---
+    "realtime": {
+        "JPY=X": "ドル円",
+        "NIY=F": "CME日経平均先物",
+    },
+    # --- サブセクターETF ---
+    "sector_etfs": {
+        "SMH":  "半導体ETF",
+        "IGV":  "SaaS/ソフトウェアETF",
+        "XLF":  "金融ETF",
+        "XME":  "金属・鉱業ETF",
+        "XLU":  "公益事業ETF",
+        "XBI":  "バイオテクETF",
+    },
+    # --- メガキャップ ---
+    "megacaps": {
+        "AAPL":  "Apple",
+        "GOOGL": "Alphabet",
+        "META":  "Meta",
+        "TSLA":  "Tesla",
+    },
+}
+
+# ニュースフィルタリング用スパムキーワード
+NEWS_SPAM_KEYWORDS = [
+    "PR", "PR TIMES", "広告", "Sponsored", "AD", "プレスリリース",
+    "キャンペーン", "プロモーション", "お知らせ",
+]
+
+
+# =====================================================================
+# カレンダー判定ヘルパー（特殊需給日の検知）
+# =====================================================================
+def is_major_sq_day(target_date=None):
+    """
+    メジャーSQ日（3,6,9,12月の第2金曜日）かどうかを判定する。
+    target_dateがNoneの場合は今日（JST）を使用。
+    """
+    from datetime import datetime, timezone, timedelta
+    if target_date is None:
+        jst = timezone(timedelta(hours=9))
+        target_date = datetime.now(jst).date()
+
+    # メジャーSQは3,6,9,12月
+    if target_date.month not in (3, 6, 9, 12):
+        return False
+
+    # 第2金曜日を計算
+    import calendar
+    cal = calendar.monthcalendar(target_date.year, target_date.month)
+    # 各週の金曜日（index=4）を取得
+    fridays = [week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY] != 0]
+    if len(fridays) >= 2:
+        second_friday = fridays[1]
+        return target_date.day == second_friday
+    return False
+
+
+def is_month_end_business_day(target_date=None):
+    """月末最終営業日かどうかを判定する"""
+    from datetime import datetime, timezone, timedelta
+    import calendar
+    if target_date is None:
+        jst = timezone(timedelta(hours=9))
+        target_date = datetime.now(jst).date()
+
+    last_day = calendar.monthrange(target_date.year, target_date.month)[1]
+    from datetime import date
+    end = date(target_date.year, target_date.month, last_day)
+
+    # 最終営業日を逆算（土日を飛ばす）
+    while end.weekday() >= 5:  # 5=土, 6=日
+        end = end - timedelta(days=1)
+
+    return target_date == end
+
+
+def is_earnings_season(target_date=None):
+    """決算発表集中期間（5月・11月）かどうかを判定する"""
+    from datetime import datetime, timezone, timedelta
+    if target_date is None:
+        jst = timezone(timedelta(hours=9))
+        target_date = datetime.now(jst).date()
+    return target_date.month in (5, 11)
+
+
+def is_us_market_holiday_yesterday(us_market_data):
+    """
+    米国市場が前日休場だったかを、取得データの日付から判定する。
+    us_market_dataが空またはデータ日付が2営業日以上前なら休場と判定。
+    """
+    if us_market_data is None:
+        return True
+    # データが空ならTrue
+    if not us_market_data:
+        return True
+    return False
+
+
+def get_calendar_warnings(target_date=None):
+    """
+    本日の特殊需給イベントをリストで返す。
+    空リスト = 通常日。
+    """
+    warnings = []
+    if is_major_sq_day(target_date):
+        warnings.append("⚠️ 本日はメジャーSQ日です。後場の乱高下に警戒してください。")
+    if is_month_end_business_day(target_date):
+        warnings.append("⚠️ 本日は月末最終営業日です。リバランスによる需給変動に注意してください。")
+    if is_earnings_season(target_date):
+        warnings.append("📢 決算発表集中期間のため、マクロ要因よりも個別業績の影響が大きくなります。")
+    return warnings
