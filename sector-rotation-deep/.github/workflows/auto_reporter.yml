@@ -1,8 +1,10 @@
 name: Auto Reporter
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    # 日本時間 19:00 (US朝5時)
     - cron: '0 10 * * *'
   workflow_dispatch:
 
