@@ -8,8 +8,59 @@ Gemini AI 深層分析モジュール
 import os
 import pandas as pd
 from dotenv import load_dotenv
+from datetime import datetime, timezone, timedelta
 
 load_dotenv()
+
+# AI呼び出しスロット制（JST）
+# 各スロットの開始時刻に1回だけAI実行、次のスロット開始までキャッシュで返す
+# スロット: 08:00, 12:30, 16:00
+_AI_SLOT_BOUNDARIES = [
+    (8, 0),    # 朝スロット開始
+    (12, 30),  # 昼スロット開始
+    (16, 0),   # 夕方スロット開始
+]
+
+def get_ai_slot() -> str:
+    """
+    現在のAIスロットIDを返す。
+    スロットは日付+時間帯で一意に識別される。
+    同じスロット内ではキャッシュが効き、APIは呼ばれない。
+    
+    スロット遷移:
+      00:00〜07:59 → 前日16:00スロット（AIなし、前回キャッシュ or フォールバック）
+      08:00〜12:29 → 当日08:00スロット
+      12:30〜15:59 → 当日12:30スロット
+      16:00〜23:59 → 当日16:00スロット
+    
+    Returns: "2026-04-17_08" のような文字列
+    """
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst)
+    now_minutes = now.hour * 60 + now.minute
+    
+    # 現在のスロットを判定
+    current_slot_label = "prev"  # 深夜〜早朝は前日の最終スロット扱い
+    slot_date = now
+    
+    for h, m in reversed(_AI_SLOT_BOUNDARIES):
+        boundary = h * 60 + m
+        if now_minutes >= boundary:
+            current_slot_label = f"{h:02d}"
+            break
+    
+    if current_slot_label == "prev":
+        # 深夜〜早朝 → 前日の16:00スロット
+        slot_date = now - timedelta(days=1)
+        current_slot_label = "16"
+    
+    return f"{slot_date.strftime('%Y-%m-%d')}_{current_slot_label}"
+
+
+def is_ai_window() -> bool:
+    """後方互換用: マクロ風向き予想からも使用"""
+    # スロット制では常にTrueを返し、キャッシュキーで制御する
+    return True
 
 
 def _get_api_key() -> str | None:
@@ -239,7 +290,8 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
     import json
     import time as _time
 
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    # コスト最適化: 2.0-flashに固定（2.5-flashのThinkingトークンが高額のため）
+    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
     max_429_retries = 1  # 429エラー時の最大リトライ回数
@@ -251,7 +303,7 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
             url = f"{base_url}/{model_name}:generateContent?key={api_key}"
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 8000}
+                "generationConfig": {"maxOutputTokens": 3000}
             }
             try:
                 resp = _req.post(url, json=payload, timeout=120)
@@ -389,20 +441,27 @@ def _generate_fallback_summary(sector_summary: pd.DataFrame, oversold_stocks: pd
 def get_shared_ai_insight(date_str: str, db_version: float):
     """
     ダッシュボードとAIインサイトページで共有するための分析実行・キャッシュ関数
-    db_version に db_manager.get_db_last_modified() を渡すことで、
-    DBが更新された（＝データを最新化した）タイミングでキャッシュが破棄・再実行される
+    
+    【コスト最適化 — スロット制】
+    1日3スロット（JST 8:00 / 12:30 / 16:00）で区切り、
+    各スロットの最初のアクセス時にのみAIを1回実行。
+    同じスロット内では何度リロードしてもキャッシュを返す。
+    スロットが切り替わると自動的に再実行される。
     """
     import streamlit as st
     from modules.db_manager import get_sector_summary, get_oversold_stocks, get_volume_surge_stocks
     from modules.news_fetcher import fetch_news_summary
-    from datetime import datetime, timezone, timedelta
+
+    # 現在のスロットIDを取得（キャッシュキーとして使用）
+    slot_id = get_ai_slot()
 
     @st.cache_data(show_spinner="🤖 Gemini AIが深層分析を実行中...（30秒ほどかかる場合があります）")
-    def _run_analysis(d_str: str, v: float):
+    def _run_analysis(slot: str, d_str: str):
         sector_summary = get_sector_summary(d_str)
         oversold = get_oversold_stocks(d_str)
         volume_surge = get_volume_surge_stocks(d_str)
-        news_text = fetch_news_summary(max_articles=15)
+        # コスト最適化: ニュース記事数を15→5に削減
+        news_text = fetch_news_summary(max_articles=5)
         
         # マクロ指標の取得（AI分析用）
         from modules.market_overview import fetch_market_overview
@@ -423,7 +482,7 @@ def get_shared_ai_insight(date_str: str, db_version: float):
         jst = timezone(timedelta(hours=9))
         return result, datetime.now(jst).strftime("%H:%M"), weather_comment
         
-    return _run_analysis(date_str, db_version)
+    return _run_analysis(slot_id, date_str)
 
 def clear_shared_ai_insight():
     """

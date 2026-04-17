@@ -528,27 +528,25 @@ def _generate_fallback_result(step1: Dict, macro_data: Dict) -> Dict:
 
 
 # =====================================================================
-# E. 公開エントリーポイント（キャッシュ統合）
+# E. 公開エントリーポイント（スロット制キャッシュ）
 # =====================================================================
-@st.cache_data(ttl=3600, show_spinner="🌍 海外機関プレイブック＆風向き予想を分析中...")
 def get_macro_wind_forecast() -> Dict[str, Any]:
     """
     マクロ風向き予想のメインエントリーポイント。
-    STEP1 → STEP2(AI) → フォールバック の順で処理し、
-    ダッシュボード表示用の統合結果を返却する。
     
-    Returns:
-        dict: {
-            "playbook": str,
-            "tailwind_sectors": list,
-            "headwind_sectors": list,
-            "evidence": dict,
-            "warnings": list,
-            "is_us_holiday": bool,
-            "is_earnings_season": bool,
-            "analyzed_at": str (HH:MM)
-        }
+    【コスト最適化 — スロット制】
+    1日3スロット（JST 8:00 / 12:30 / 16:00）で区切り、
+    各スロットの最初のアクセス時にのみAI+データ取得を1回実行。
+    同じスロット内ではキャッシュを返す。
     """
+    from modules.ai_analyzer import get_ai_slot
+    slot_id = get_ai_slot()
+    return _cached_macro_wind_forecast(slot_id)
+
+
+@st.cache_data(show_spinner="🌍 海外機関プレイブック＆風向き予想を分析中...")
+def _cached_macro_wind_forecast(slot_id: str) -> Dict[str, Any]:
+    """スロットIDをキャッシュキーとして使用する内部関数"""
     jst = timezone(timedelta(hours=9))
     analyzed_at = datetime.now(jst).strftime("%H:%M")
 
