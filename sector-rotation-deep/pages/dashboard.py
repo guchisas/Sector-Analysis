@@ -858,9 +858,9 @@ def render():
         # スタイルの適用
         styled_df = filtered_df.style
         if "出来高倍率 (x)" in selected_columns:
-            styled_df = styled_df.applymap(highlight_volume, subset=["出来高倍率 (x)"])
+            styled_df = styled_df.map(highlight_volume, subset=["出来高倍率 (x)"])
         if "25MA乖離率 (%)" in selected_columns:
-            styled_df = styled_df.applymap(highlight_ppo, subset=["25MA乖離率 (%)"])
+            styled_df = styled_df.map(highlight_ppo, subset=["25MA乖離率 (%)"])
         
         # 2. Streamlit `column_config` を用いたリッチUI化
         st.dataframe(

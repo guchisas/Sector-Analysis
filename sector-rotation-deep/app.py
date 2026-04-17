@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.styles import get_custom_css
-from modules.db_manager import init_db, db_exists
+from modules.db_manager import init_db, db_exists, import_shikiho_csv
 
 # ===== ページ設定 =====
 st.set_page_config(
@@ -28,8 +28,11 @@ st.set_page_config(
 # ===== カスタムCSS注入 =====
 st.markdown(get_custom_css(), unsafe_allow_html=True)
 
-# ===== DB初期化 =====
+# ===== DB初期化 & 四季報CSVの自動インポート =====
 init_db()
+_shikiho_csv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "shikiho_50.csv")
+if os.path.exists(_shikiho_csv):
+    import_shikiho_csv(_shikiho_csv)
 
 # ===== サイドバー =====
 
