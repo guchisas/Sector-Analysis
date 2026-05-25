@@ -290,9 +290,8 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
     import json
     import time as _time
 
-    # コスト最適化: 2.0-flashを優先（2.5-flashはフォールバック）
-    # ※ gemini-1.5-flash は2025年9月に廃止済みのため使用不可
-    models_to_try = ["gemini-2.0-flash", "gemini-2.5-flash"]
+    # gemini-2.5-flashを優先（2.0-flashはプロジェクトによって利用不可のため）
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
     max_429_retries = 1  # 429エラー時の最大リトライ回数
@@ -319,13 +318,21 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
                     # このモデルが存在しない場合は次を試す
                     last_error = f"Model {model_name} not found (404)"
                     continue
+                if resp.status_code == 503:
+                    # サービス一時的に利用不可 → 次のモデルを試す
+                    last_error = f"{model_name}: サービス一時利用不可 (503)"
+                    continue
                 resp.raise_for_status()
                 data = resp.json()
                 text = data["candidates"][0]["content"]["parts"][0]["text"]
                 if text:
                     return text
             except Exception as e:
-                last_error = str(e)
+                # APIキーがエラーメッセージに含まれないようサニタイズ
+                err_str = str(e)
+                if api_key and api_key in err_str:
+                    err_str = err_str.replace(api_key, "***API_KEY***")
+                last_error = err_str
                 continue
         else:
             # forループが正常終了（breakせず） = 429以外のエラーで全モデル失敗 → 諦める
