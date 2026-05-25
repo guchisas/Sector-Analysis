@@ -290,8 +290,9 @@ def _execute_gemini_call(prompt: str, api_key: str) -> str:
     import json
     import time as _time
 
-    # コスト最適化: 2.0-flashに固定（2.5-flashのThinkingトークンが高額のため）
-    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    # コスト最適化: 2.0-flashを優先（2.5-flashはフォールバック）
+    # ※ gemini-1.5-flash は2025年9月に廃止済みのため使用不可
+    models_to_try = ["gemini-2.0-flash", "gemini-2.5-flash"]
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
     max_429_retries = 1  # 429エラー時の最大リトライ回数
